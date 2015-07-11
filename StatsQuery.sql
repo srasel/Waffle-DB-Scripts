@@ -260,43 +260,120 @@ begin
 	DECLARE @parmDefinition nvarchar(500);
 	set @parmDefinition = N'@start int, @end int'
 
+	IF OBJECT_ID('SumTable', 'U') IS NOT NULL
+		DROP TABLE dbo.SumTable 
+
+	--CREATE TABLE [dbo].[SumTable](
+	--	[geo] [nvarchar](255) NULL,
+	--	[time] [varchar](10) NULL,
+	--	[val] [float] NULL,
+	--	[Indicator Code] [varchar](255) NULL
+	--) ON [PRIMARY]
+
 	set @dyn_sql = N'
-	select ' + @colInFinalSelect + ','  + @indColInSelect + ' 
-	from (
-		select ' + @colInFinalSelect + ', val, ' + @interimSelect + ' [Indicator Code]
-		from (select ' + @colInQuerySelection + ', sum(f.Value) val,  di.[Indicator Code]
-		from dbo.FactFinal f 
-		left join (select * from #geoFinal) dc
-		on f.[Country Code] = dc.ID
-		left join ( select i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] from DimIndicators i left join #whereind w on i.[Indicator Code] = w.name where w.name is not null) di
-		on f.[Indicator Code] = di.ID
-		, #time t --#wheretime t 
-		--on t.period = f.Period
-		where dc.ID is not null
-		and f.DataSourceID = (select top 1 ID from DimDataSource inner join #from on DataSource = tab)
-		and di.ID is not null
-		and f.Period = t.period--(Period >=t.minTime and Period <= t.maxTime)
-		--and f.Period between @start and @end
-		group by ' + @colInGroupBy + ', di.[Indicator Code]) b where val > 0
-	)A 
-	pivot
-	(
-		sum(val)
-		for [Indicator Code] in (' + @indCol + ')
-	) as pvt
-	'
-	print @dyn_sql
+			select ' + @colInQuerySelection + ', sum(f.Value) val,  di.[Indicator Code]
+			into SumTable
+			from dbo.FactFinal f 
+			left join (select * from #geoFinal) dc
+			on f.[Country Code] = dc.ID
+			left join ( select i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] from DimIndicators i left join #whereind w on i.[Indicator Code] = w.name where w.name is not null) di
+			on f.[Indicator Code] = di.ID
+			, #time t --#wheretime t 
+			--on t.period = f.Period
+			where dc.ID is not null
+			and f.DataSourceID = (select top 1 ID from DimDataSource inner join #from on DataSource = tab)
+			and di.ID is not null
+			and f.Period = t.period--(Period >=t.minTime and Period <= t.maxTime)
+			--and f.Period between @start and @end
+			group by ' + @colInGroupBy + ', di.[Indicator Code]
+		'
+	--print @dyn_sql
 	execute sp_executesql @dyn_sql, @parmDefinition, @start = @start, @end = @end
-	
-	/*
-execute StatsQuery 
-'
-<root><query><SELECT>geo</SELECT><SELECT>geo.cat</SELECT><SELECT>geo.name</SELECT><SELECT>time</SELECT>
-<SELECT>age</SELECT>
-<SELECT>pop</SELECT><WHERE><geo>eur</geo><geo.cat>region</geo.cat>
-<time>2050-2100</time><quantity>age_group_0-14</quantity></WHERE><FROM>spreedsheet</FROM></query><lang>en</lang></root>
-'
-*/
+
+	--select * from SumTable
+
+	if(CHARINDEX('time',@colInQuerySelection,1)>0)
+	begin
+		
+		declare @cols nvarchar(max)
+		select @cols =  stuff((select ',['+ COLUMN_NAME + ']'  from INFORMATION_SCHEMA.COLUMNS
+		where TABLE_NAME = 'SumTable'
+		and COLUMN_NAME not in ('time','val')
+		for xml path('')),1,1,'')
+
+		set @dyn_sql = N'
+			insert into SumTable(' +  @cols + ', time, val)
+			select ' + @cols + ',period, NULL val
+			from SumTable, #time
+			group by ' + @cols + ', period
+		'
+		execute sp_executesql @dyn_sql
+		--select * from SumTable
+
+		IF OBJECT_ID('WithAllData', 'U') IS NOT NULL
+			DROP TABLE dbo.WithAllData 
+
+		set @dyn_sql = N'
+			select ' + @cols + ',time,sum(val) val
+			into WithAllData
+			from SumTable--, #time
+			group by ' + @cols + ', time
+		'
+		execute sp_executesql @dyn_sql
+		--select * from WithAllData
+
+		set @dyn_sql = N'
+			select ' + @colInFinalSelect + ','  + @indColInSelect + ' 
+			from (
+				select ' + @colInFinalSelect + ', val, ' + @interimSelect + ' [Indicator Code]
+				from (
+						SELECT ' + @cols + ',[time]
+						,val=CASE
+							WHEN val IS NOT NULL THEN val
+							ELSE s + (1. * m / x) * (LEAD(val, n, s) OVER (partition by ' + @cols + ' ORDER BY [time]) -s)
+							END
+						FROM
+						(
+							SELECT ' + @cols + ',[time], val, s=MAX(val) OVER (PARTITION BY ' + @cols +',c)
+								,n=ROW_NUMBER() OVER (PARTITION BY ' + @cols +',c ORDER BY [time] DESC)
+								,m=ROW_NUMBER() OVER (PARTITION BY ' + @cols +',c ORDER BY [time]) - 1
+								,x=1 + COUNT(CASE WHEN val IS NULL THEN 1 END) OVER (PARTITION BY ' + @cols +',c)
+							FROM
+							(
+								SELECT ' + @cols + ',[time], val
+									,c=COUNT(val) OVER (partition by ' + @cols + ' ORDER BY time)
+								FROM WithAllData
+							) a
+						) a
+				) b --where val > 0
+			)A 
+			pivot
+			(
+				sum(val)
+				for [Indicator Code] in (' + @indCol + ')
+			) as pvt
+		'
+		execute sp_executesql @dyn_sql
+	end
+
+	else
+	begin
+		set @dyn_sql = N'
+			select ' + @colInFinalSelect + ','  + @indColInSelect + ' 
+			from (
+				select ' + @colInFinalSelect + ', val, ' + @interimSelect + ' [Indicator Code]
+				from (
+						select * from SumTable
+				) b --where val > 0
+			)A 
+			pivot
+			(
+				sum(val)
+				for [Indicator Code] in (' + @indCol + ')
+			) as pvt
+		'
+		execute sp_executesql @dyn_sql
+	end
 
 end
 
@@ -305,7 +382,7 @@ GO
 
 execute StatsQuery 
 '
-<root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>lex</SELECT><WHERE><geo>abw</geo>
+<root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>lex</SELECT><WHERE><geo>abw</geo><geo>swe</geo>
 <geo.cat>country</geo.cat><time>2050-2100</time><quantity /></WHERE>
 <FROM>spreedsheet</FROM></query><lang>en</lang></root>
 '
