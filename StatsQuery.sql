@@ -277,7 +277,7 @@ begin
 		and di.ID is not null
 		and f.Period = t.period--(Period >=t.minTime and Period <= t.maxTime)
 		--and f.Period between @start and @end
-		group by ' + @colInGroupBy + ', di.[Indicator Code]) b --where val > 0
+		group by ' + @colInGroupBy + ', di.[Indicator Code]) b where val > 0
 	)A 
 	pivot
 	(
@@ -306,7 +306,7 @@ GO
 execute StatsQuery 
 '
 <root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>lex</SELECT><WHERE><geo>abw</geo>
-<geo.cat>country</geo.cat><time>1990-2100</time><quantity /></WHERE>
+<geo.cat>country</geo.cat><time>2050-2100</time><quantity /></WHERE>
 <FROM>spreedsheet</FROM></query><lang>en</lang></root>
 '
 
