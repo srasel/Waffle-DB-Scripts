@@ -70,19 +70,53 @@ begin
 	select x.col.value('.', 'varchar(100)') AS [text()]
 	FROM @XmlStr.nodes('//root//query//WHERE//geo') x(col)
 
+	--select * from #wheregeo
+
 	if(@@ROWCOUNT = 0 or (select top 1 name from #wheregeo)='*')
 	begin
 		truncate table #wheregeo
-
-		if((select count(*) from #wherecat)>1)
+		if((select count(*) from #wherecat)>0)
 		begin
 			insert into #wheregeo
-			select id [Country Code] from DimGeo where cat = (select top 1 * from #wherecat)
+			select id [Country Code] from DimGeo g inner join #wherecat wc on g.cat = wc.name
 		end
 		else
 		begin
 			insert into #wheregeo
 			select id [Country Code] from DimGeo --where cat = (select top 1 * from #wherecat)
+		end
+	end
+	else
+	begin
+		if((select count(*) from #wherecat)>0)
+		begin
+			
+			;with cte (id, cat, rnk)as
+			(
+				select cast(id as nvarchar(255)) id 
+				,cast(cat as nvarchar(255))cat 
+				,geo.rnk rnk
+				from (select *,case when cat ='planet' then 1 
+					when cat = 'region' then 2
+					when cat = 'country' then 3 end rnk from DimGeo) geo 
+				inner join #wheregeo wg on geo.id = wg.name
+
+				union all
+
+				select g.id
+				,g.cat
+				,c.rnk+1
+				from (select *,case when cat ='planet' then 1 
+					when cat = 'region' then 2
+					when cat = 'country' then 3 end rnk from DimGeo) g 
+				inner join cte c on g.region = c.id
+			)
+			select c.id into #wheregeotemp from cte c inner join #wherecat wc on c.cat = wc.name
+
+			truncate table #wheregeo
+			insert into #wheregeo
+			select * from #wheregeotemp
+
 		end
 	end
 	
@@ -230,26 +264,32 @@ begin
 	--select * from #wherecat
 	--select * from #wheregeo
 
+	--select * from #wheregeo
 	;with cte (id, name, par, parId, cat, rnk)as
 	(
 		select cast(id as nvarchar(255)) id, 
 		cast(geo.name as nvarchar(255)) name,
-		case when cat = (select top 100 percent * from #wherecat) then cast(geo.id as nvarchar(255)) else cast(NULL as nvarchar(255)) end par,
-		case when cat = (select top 100 percent * from #wherecat) then cast(geo.name as nvarchar(255)) else cast(NULL as nvarchar(255)) end parId, 
-		cast(cat as nvarchar(255))cat, 1 rnk
-		from DimGeo geo inner join #wheregeo wg on geo.id = wg.name
+		geo.id par,
+		geo.cat parId, 
+		cast(cat as nvarchar(255))cat, geo.rnk rnk
+		from (select *,case when cat ='planet' then 1 
+			when cat = 'region' then 2
+			when cat = 'country' then 3 end rnk from DimGeo) geo 
+		inner join #wheregeo wg on geo.id = wg.name
+
 		union all
+
 		select g.id, 
 		g.name,
-		(case when g.cat = (select top 100 percent * from #wherecat) then cast(g.id as nvarchar(255)) else cast(''+c.id as nvarchar(255))end)  par,
-		(case when g.cat = (select top 100 percent * from #wherecat) then cast(g.name as nvarchar(255)) else cast(''+c.name as nvarchar(255))end) parId, 
+		c.par  par,
+		c.parId parId, 
 		g.cat, c.rnk+1
 		from (select *,case when cat ='planet' then 1 
 			when cat = 'region' then 2
 			when cat = 'country' then 3 end rnk from DimGeo) g inner join cte c
 		on g.region = c.id
 	)
-	select dc.ID, c.par [Country Code], c.parId [Short Name], (select top 100 percent name from #wherecat) category 
+	select dc.ID, c.par [Country Code], c.parId [Short Name]
 	into #geoFinal 
 	from dimCountry dc 
 	left join (select * from cte where rnk = (select max(rnk) from cte)) c 
@@ -382,8 +422,8 @@ GO
 
 execute StatsQuery 
 '
-<root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>lex</SELECT><WHERE><geo>abw</geo><geo>swe</geo>
-<geo.cat>country</geo.cat><time>2050-2100</time><quantity /></WHERE>
+<root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>lex</SELECT><WHERE><geo>world</geo>
+<geo.cat>region</geo.cat><time>2050-2100</time><quantity /></WHERE>
 <FROM>spreedsheet</FROM></query><lang>en</lang></root>
 '
 
