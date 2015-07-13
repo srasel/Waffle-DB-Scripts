@@ -57,11 +57,52 @@ begin
 	FROM @XmlStr.nodes('//root//query//WHERE//geo') x(col)
 	
 	if(@@ROWCOUNT = 0 or (select top 1 name from #wheregeo)='*')
-	begin
-		truncate table #wheregeo
-		insert into #wheregeo
-		select id from DimGeo where cat in (select name from #wherecat where name <> '')
-	end
+		begin
+			truncate table #wheregeo
+			if((select count(*) from #wherecat)>0)
+			begin
+				insert into #wheregeo
+				select id [Country Code] from DimGeo g inner join #wherecat wc on g.cat = wc.name
+			end
+			else
+			begin
+				insert into #wheregeo
+				select id [Country Code] from DimGeo --where cat = (select top 1 * from #wherecat)
+			end
+		end
+		else
+		begin
+			if((select count(*) from #wherecat)>0)
+			begin
+			
+				;with cte (id, cat, rnk)as
+				(
+					select cast(id as nvarchar(255)) id 
+					,cast(cat as nvarchar(255))cat 
+					,geo.rnk rnk
+					from (select *,case when cat ='planet' then 1 
+						when cat = 'region' then 2
+						when cat = 'country' then 3 end rnk from DimGeo) geo 
+					inner join #wheregeo wg on geo.id = wg.name
+
+					union all
+
+					select g.id
+					,g.cat
+					,c.rnk+1
+					from (select *,case when cat ='planet' then 1 
+						when cat = 'region' then 2
+						when cat = 'country' then 3 end rnk from DimGeo) g 
+					inner join cte c on g.region = c.id
+				)
+				select c.id into #wheregeotemp from cte c inner join #wherecat wc on c.cat = wc.name
+
+				truncate table #wheregeo
+				insert into #wheregeo
+				select * from #wheregeotemp
+
+			end
+		end
 	
 	/*
 	select * from #select
@@ -90,16 +131,21 @@ begin
 		select min(period),max(period) from DimTime
 	end
 
-	;with cte(period) as
-	(
-		select minTime from #wheretime
-		union all
-		select c.period + 1
-		from cte c
-		where c.period <= (select maxTime from #wheretime)
-	)
-	select * into #time
-	from cte;
+	declare @start int
+	declare @end int
+	declare @counter int
+
+	create table #time (period int)
+
+	select @start = minTime, @end = maxTime from #wheretime
+	set @counter = @start
+
+	while @counter <= @end 
+	begin
+		insert into #time
+		select @counter
+		set @counter = @counter + 1;
+	end
 
 	declare @dColsSelection nvarchar(max)
 	select @dColsSelection = STUFF((
