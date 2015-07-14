@@ -239,9 +239,11 @@ begin
 
 		declare @indColInSelect nvarchar(max)
 		select @indColInSelect = STUFF((
-		select (',' + '([' + s.name + ']) [' + s.name + ']') as [text()]
+		select (',' + ' case when ''' + s.name + ''' = ''pop'' then round([' + s.name + '],0) else round([' + s.name + '],4) end  [' + s.name + ']') as [text()]
 		from #whereind s
 		for xml path ('')),1,1,'')
+
+		--select @indColInSelect
 	
 		declare @interimSelect varchar(100)
 		set @interimSelect = '[Indicator Code]'
@@ -270,7 +272,7 @@ begin
 			select cast(id as nvarchar(255)) id, 
 			cast(geo.name as nvarchar(255)) name,
 			geo.id par,
-			geo.cat parId, 
+			geo.name parId, 
 			cast(cat as nvarchar(255))cat, geo.rnk rnk
 			from (select *,case when cat ='planet' then 1 
 				when cat = 'region' then 2
@@ -289,16 +291,19 @@ begin
 				when cat = 'country' then 3 end rnk from DimGeo) g inner join cte c
 			on g.region = c.id
 		)
-		select dc.ID, dc.[Country Code] [Country Code], dc.[Short Name] [Short Name], c.cat [category]
+		select dc.ID, c.par [Country Code], c.parId [Short Name], c.cat [category]
 		into #geoFinal 
 		from dimCountry dc 
 		left join (select * from cte where rnk = (select max(rnk) from cte)) c 
 		on dc.[Short Name] = c.name where c.name is not null 
 	
-		--select * from #time
+		--select * from #geoFinal
 
 		DECLARE @parmDefinition nvarchar(500);
 		set @parmDefinition = N'@start int, @end int'
+
+		declare @newId nvarchar(max)
+		set @newId = newid()
 
 		IF OBJECT_ID('SumTable', 'U') IS NOT NULL
 			DROP TABLE dbo.SumTable 
@@ -312,7 +317,7 @@ begin
 
 		set @dyn_sql = N'
 				select ' + @colInQuerySelection + ', sum(f.Value) val,  di.[Indicator Code]
-				into SumTable
+				into [SumTable' + @newId + ']
 				from dbo.FactFinal f 
 				left join (select * from #geoFinal) dc
 				on f.[Country Code] = dc.ID
@@ -330,21 +335,21 @@ begin
 		--print @dyn_sql
 		execute sp_executesql @dyn_sql, @parmDefinition, @start = @start, @end = @end
 
-		--select * from SumTable
+		--exec('select * from [SumTable' + @newId + ']')
+		declare @dropT nvarchar(max)
 
 		if(CHARINDEX('time',@colInQuerySelection,1)>0)
 		begin
-		
 			declare @cols nvarchar(max)
 			select @cols =  stuff((select ',['+ COLUMN_NAME + ']'  from INFORMATION_SCHEMA.COLUMNS
-			where TABLE_NAME = 'SumTable'
+			where TABLE_NAME = 'SumTable' + @newId
 			and COLUMN_NAME not in ('time','val')
 			for xml path('')),1,1,'')
-
+			
 			set @dyn_sql = N'
-				insert into SumTable(' +  @cols + ', time, val)
+				insert into [SumTable' + @newId + '](' +  @cols + ', time, val)
 				select ' + @cols + ',period, NULL val
-				from SumTable, #time
+				from [SumTable' + @newId + '], #time
 				group by ' + @cols + ', period
 			'
 			execute sp_executesql @dyn_sql
@@ -355,13 +360,14 @@ begin
 
 			set @dyn_sql = N'
 				select ' + @cols + ',time,sum(val) val
-				into WithAllData
-				from SumTable--, #time
+				into [WithAllData' + @newId + '] 
+				from [SumTable' + @newId + '] 
 				group by ' + @cols + ', time
 			'
 			execute sp_executesql @dyn_sql
 			--select * from WithAllData
-
+			
+			
 			set @dyn_sql = N'
 				select ' + @colInFinalSelect + ','  + @indColInSelect + ' 
 				from (
@@ -382,7 +388,7 @@ begin
 								(
 									SELECT ' + @cols + ',[time], val
 										,c=COUNT(val) OVER (partition by ' + @cols + ' ORDER BY time)
-									FROM WithAllData
+									FROM [WithAllData' + @newId + '] 
 								) a
 							) a
 					) b --where val > 0
@@ -393,7 +399,9 @@ begin
 					for [Indicator Code] in (' + @indCol + ')
 				) as pvt
 			'
+			--print @dyn_sql
 			execute sp_executesql @dyn_sql
+
 		end
 
 		else
@@ -403,7 +411,7 @@ begin
 				from (
 					select ' + @colInFinalSelect + ', val, ' + @interimSelect + ' [Indicator Code]
 					from (
-							select * from SumTable
+							select * from [SumTable' + @newId + ']
 					) b --where val > 0
 				)A 
 				pivot
@@ -413,8 +421,16 @@ begin
 				) as pvt
 			'
 			execute sp_executesql @dyn_sql
-		
+			
+			
 		end
+
+		set @dropT = 'drop table [' + ('SumTable' + @newId) + ']'
+		IF OBJECT_ID('SumTable' + @newId + '', 'U') IS NOT NULL
+			exec(@dropT)
+		set @dropT = 'drop table [' + ('WithAllData' + @newId) + ']'
+		IF OBJECT_ID('WithAllData' + @newId + '', 'U') IS NOT NULL
+			exec(@dropT)
 	end try
 	begin catch
 		select null geo, ERROR_MESSAGE() [geo.name], null [time]
@@ -427,11 +443,8 @@ GO
 
 execute StatsQuery 
 '
-<root><query><SELECT>geo</SELECT><SELECT>geo.name</SELECT>
-<SELECT>geo.cat</SELECT>
-<SELECT>time</SELECT>
-<WHERE><geo>afg</geo>
-<geo.cat>country</geo.cat><time>1990-2050</time><quantity /></WHERE>
-<FROM>wdi</FROM></query><lang>en</lang></root>
+<root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>geo.name</SELECT><SELECT>lex</SELECT>
+<WHERE><geo>*</geo><geo.cat>region</geo.cat><time>2000</time><quantity /></WHERE>
+<FROM>spreedsheet</FROM></query><lang>en</lang></root>
 '
 
