@@ -29,6 +29,13 @@ begin
 	create table #from (tab varchar(100))
 
 	declare @dyn_sql nvarchar(max)
+	declare @dropT nvarchar(max)
+	declare @newId nvarchar(max)
+	set @newId = newid()
+
+	declare @factTable nvarchar(max)
+	set @factTable = 'FactFinal'
+
 	begin try
 		insert into #select
 		select x.col.value('.', 'varchar(100)') AS [text()]
@@ -53,6 +60,12 @@ begin
 			--where [Indicator Code] like 'pop'
 			--or [Indicator Code] like 'gdp'
 			--or [Indicator Code] like 'lex'
+		end
+
+		if((select count(*) from #select where name like 'incomeMount_shape_stack_%') > 0)
+		begin
+			execute IncomeMountainQuery @xml
+			return
 		end
 
 		;WITH cte AS (
@@ -239,7 +252,7 @@ begin
 
 		declare @indColInSelect nvarchar(max)
 		select @indColInSelect = STUFF((
-		select (',' + ' case when ''' + s.name + ''' = ''pop'' then round([' + s.name + '],0) else round([' + s.name + '],4) end  [' + s.name + ']') as [text()]
+		select (',' + ' case when ''' + s.name + ''' = ''pop'' then round([' + s.name + '],0) else round([' + s.name + '],10) end  [' + s.name + ']') as [text()]
 		from #whereind s
 		for xml path ('')),1,1,'')
 
@@ -267,13 +280,15 @@ begin
 		--select * from #wheregeo
 
 		--select * from #wheregeo
-		;with cte (id, name, par, parId, cat, rnk)as
+		;with cte (id, name, par, parId, cat, region, rnk)as
 		(
 			select cast(id as nvarchar(255)) id, 
 			cast(geo.name as nvarchar(255)) name,
 			geo.id par,
 			geo.name parId, 
-			cast(cat as nvarchar(255))cat, geo.rnk rnk
+			cast(cat as nvarchar(255))cat,
+			geo.region,
+			geo.rnk rnk
 			from (select *,case when cat ='planet' then 1 
 				when cat = 'region' then 2
 				when cat = 'country' then 3 end rnk from DimGeo) geo 
@@ -285,40 +300,83 @@ begin
 			g.name,
 			c.par  par,
 			c.parId parId, 
-			g.cat, c.rnk+1
+			c.cat, 
+			c.region,
+			c.rnk+1
 			from (select *,case when cat ='planet' then 1 
 				when cat = 'region' then 2
 				when cat = 'country' then 3 end rnk from DimGeo) g inner join cte c
 			on g.region = c.id
 		)
-		select dc.ID, c.par [Country Code], c.parId [Short Name], c.cat [category]
+		select dc.ID, c.par [Country Code], c.parId [Short Name], c.region, c.cat [category]
 		into #geoFinal 
 		from dimCountry dc 
 		left join (select * from cte where rnk = (select max(rnk) from cte)) c 
-		on dc.[Short Name] = c.name where c.name is not null 
+		on dc.[Short Name] = c.name
+		where c.name is not null 
 	
 		--select * from #geoFinal
 
 		DECLARE @parmDefinition nvarchar(500);
 		set @parmDefinition = N'@start int, @end int'
 
-		declare @newId nvarchar(max)
-		set @newId = newid()
-
 		IF OBJECT_ID('SumTable', 'U') IS NOT NULL
 			DROP TABLE dbo.SumTable 
-
-		--CREATE TABLE [dbo].[SumTable](
-		--	[geo] [nvarchar](255) NULL,
-		--	[time] [varchar](10) NULL,
-		--	[val] [float] NULL,
-		--	[Indicator Code] [varchar](255) NULL
-		--) ON [PRIMARY]
+		if((select count(*) from #select where name in ('lex','gini'))>0
+			and 
+			(select name from #wherecat) <> 'country'
+			)
+		begin
+			set @dyn_sql = N'
+					select [DataSourceID],[Country Code], [Period], [Indicator Code],
+							[Value]/iif(isnull([SumValue],1)=0, 1, isnull([SumValue],1)) [Value]
+					into [FactFinal' + @newId + ']
+					from (
+						select par, A.[DataSourceID],A.[Country Code], A.[Period], A.[Indicator Code],
+								(isnull(A.value,0) * isnull(B.value,0)) [Value]
+								, sum(
+									iif(A.value is null, 0, 1) * B.value
+								) over(partition by par, A.[Period], A.[Indicator Code]) [SumValue]
+						--into [FactFinal' + @newId + ']
+						from (
+							select f.*,dc.[Country Code] par,dc.[Short Name] partID  from dbo.[' + @factTable + '] f 
+							left join (select * from #geoFinal) dc
+							on f.[Country Code] = dc.ID
+							left join ( select i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] from DimIndicators i left join #whereind w on i.[Indicator Code] = w.name where w.name is not null) di
+							on f.[Indicator Code] = di.ID
+							, #time t 
+							where dc.ID is not null
+							and f.DataSourceID = (select top 1 ID from DimDataSource inner join #from on DataSource = tab)
+							and di.ID is not null
+							and f.Period = t.period
+						)A left join
+						(
+							select f.* from dbo.[' + @factTable + '] f 
+							left join (select * from #geoFinal) dc
+							on f.[Country Code] = dc.ID
+							left join ( select i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] from DimIndicators i where [Indicator Code] = ''pop'') di
+							on f.[Indicator Code] = di.ID
+							, #time t 
+							where dc.ID is not null
+							and f.DataSourceID = (select top 1 ID from DimDataSource inner join #from on DataSource = tab)
+							and f.DataSourceID = di.DataSourceID
+							and di.ID is not null
+							and f.Period = t.period
+						) B 
+						on A.[DataSourceID] = B.[DataSourceID]
+						and A.[Country Code] = B.[Country Code]
+						and A.[Period] = B.[Period]
+					)C
+				'
+			execute sp_executesql @dyn_sql, @parmDefinition, @start = @start, @end = @end
+			--exec('select * from [FactFinal' + @newId + ']')
+			set @factTable = 'FactFinal' + @newId
+		end
 
 		set @dyn_sql = N'
 				select ' + @colInQuerySelection + ', sum(f.Value) val,  di.[Indicator Code]
 				into [SumTable' + @newId + ']
-				from dbo.FactFinal f 
+				from dbo.[' + @factTable + '] f 
 				left join (select * from #geoFinal) dc
 				on f.[Country Code] = dc.ID
 				left join ( select i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] from DimIndicators i left join #whereind w on i.[Indicator Code] = w.name where w.name is not null) di
@@ -336,7 +394,7 @@ begin
 		execute sp_executesql @dyn_sql, @parmDefinition, @start = @start, @end = @end
 
 		--exec('select * from [SumTable' + @newId + ']')
-		declare @dropT nvarchar(max)
+		
 
 		if(CHARINDEX('time',@colInQuerySelection,1)>0)
 		begin
@@ -431,6 +489,9 @@ begin
 		set @dropT = 'drop table [' + ('WithAllData' + @newId) + ']'
 		IF OBJECT_ID('WithAllData' + @newId + '', 'U') IS NOT NULL
 			exec(@dropT)
+		set @dropT = 'drop table [' + ('FactFinal' + @newId) + ']'
+		IF OBJECT_ID('FactFinal' + @newId + '', 'U') IS NOT NULL
+			exec(@dropT)
 	end try
 	begin catch
 		select null geo, ERROR_MESSAGE() [geo.name], null [time]
@@ -443,8 +504,11 @@ GO
 
 execute StatsQuery 
 '
-<root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>geo.name</SELECT><SELECT>lex</SELECT>
-<WHERE><geo>*</geo><geo.cat>region</geo.cat><time>2000</time><quantity /></WHERE>
-<FROM>spreedsheet</FROM></query><lang>en</lang></root>
+<root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>geo.name</SELECT><SELECT>geo.cat</SELECT>
+<SELECT>geo.region</SELECT>
+<SELECT>incomeMount_shape_stack_region</SELECT>
+<SELECT>incomeMount_shape_stack_all</SELECT><WHERE><geo>*</geo>
+<geo.cat>region</geo.cat><time>2000</time><quantity /></WHERE><FROM>spreedsheet</FROM></query>
+<lang>en</lang></root>
 '
 
