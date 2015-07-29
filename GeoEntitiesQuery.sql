@@ -128,7 +128,7 @@ begin
 	begin
 		truncate table #wheretime
 		insert into #wheretime
-		select min(period),max(period) from DimTime
+		select max(period),max(period) from DimTime
 	end
 
 	declare @start int

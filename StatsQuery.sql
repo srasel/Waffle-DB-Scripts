@@ -16,6 +16,7 @@ CREATE procedure [dbo].[StatsQuery]
 @xml xml
 as
 begin
+	SET NOCOUNT ON;
 	--select [Type] Geo, [Country Code] Name, ID [Time], ID [Value] from DimCountry
 	declare @XmlStr xml
 	set @XmlStr = @xml
@@ -37,6 +38,10 @@ begin
 	set @factTable = 'FactFinal'
 
 	begin try
+		
+		insert into LogRequest([QueryUniqueID],[InputXML])
+		select @newId, @xml
+
 		insert into #select
 		select x.col.value('.', 'varchar(100)') AS [text()]
 		FROM @XmlStr.nodes('//root//query//SELECT') x(col)
@@ -55,6 +60,12 @@ begin
 			--insert into #select
 			--select 'ind' [Indicator Code] 
 			execute GeoEntitiesQuery @xml
+			
+			update LogRequest
+			set [Status] = 1
+			,EndTime = getdate()
+			where QueryUniqueID = @newId
+
 			return
 			--from DimIndicators
 			--where [Indicator Code] like 'pop'
@@ -65,6 +76,12 @@ begin
 		if((select count(*) from #select where name like 'incomeMount_shape_stack_%') > 0)
 		begin
 			execute IncomeMountainQuery @xml
+
+			update LogRequest
+			set [Status] = 1
+			,EndTime = getdate()
+			where QueryUniqueID = @newId
+
 			return
 		end
 
@@ -83,55 +100,53 @@ begin
 		select x.col.value('.', 'varchar(100)') AS [text()]
 		FROM @XmlStr.nodes('//root//query//WHERE//geo') x(col)
 
-		--select * from #wheregeo
-
 		if(@@ROWCOUNT = 0 or (select top 1 name from #wheregeo)='*')
-		begin
-			truncate table #wheregeo
-			if((select count(*) from #wherecat)>0)
 			begin
-				insert into #wheregeo
-				select id [Country Code] from DimGeo g inner join #wherecat wc on g.cat = wc.name
-			end
-			else
-			begin
-				insert into #wheregeo
-				select id [Country Code] from DimGeo --where cat = (select top 1 * from #wherecat)
-			end
-		end
-		else
-		begin
-			if((select count(*) from #wherecat)>0)
-			begin
-			
-				;with cte (id, cat, rnk)as
-				(
-					select cast(id as nvarchar(255)) id 
-					,cast(cat as nvarchar(255))cat 
-					,geo.rnk rnk
-					from (select *,case when cat ='planet' then 1 
-						when cat = 'region' then 2
-						when cat = 'country' then 3 end rnk from DimGeo) geo 
-					inner join #wheregeo wg on geo.id = wg.name
-
-					union all
-
-					select g.id
-					,g.cat
-					,c.rnk+1
-					from (select *,case when cat ='planet' then 1 
-						when cat = 'region' then 2
-						when cat = 'country' then 3 end rnk from DimGeo) g 
-					inner join cte c on g.region = c.id
-				)
-				select c.id into #wheregeotemp from cte c inner join #wherecat wc on c.cat = wc.name
-
 				truncate table #wheregeo
-				insert into #wheregeo
-				select * from #wheregeotemp
-
+				if((select count(*) from #wherecat)>0)
+					begin
+						insert into #wheregeo
+						select id [Country Code] from DimGeo g inner join #wherecat wc on g.cat = wc.name
+					end
+				else
+					begin
+						insert into #wheregeo
+						select id [Country Code] from DimGeo --where cat = (select top 1 * from #wherecat)
+					end
 			end
-		end
+		else
+			begin
+				if((select count(*) from #wherecat)>0 and (select top 1 name from #wherecat)!='')
+					begin
+						--select * from #wherecat
+						;with cte (id, cat, rnk)as
+						(
+							select cast(id as nvarchar(255)) id 
+							,cast(cat as nvarchar(255))cat 
+							,geo.rnk rnk
+							from (select *,case when cat ='planet' then 1 
+								when cat = 'region' then 2
+								when cat = 'country' then 3 end rnk from DimGeo) geo 
+							inner join #wheregeo wg on geo.id = wg.name
+
+							union all
+
+							select g.id
+							,g.cat
+							,c.rnk+1
+							from (select *,case when cat ='planet' then 1 
+								when cat = 'region' then 2
+								when cat = 'country' then 3 end rnk from DimGeo) g 
+							inner join cte c on g.region = c.id
+						)
+						select c.id into #wheregeotemp from cte c inner join #wherecat wc on c.cat = wc.name
+					
+						truncate table #wheregeo
+						insert into #wheregeo
+						select * from #wheregeotemp
+
+					end
+			end
 	
 		insert into #wheretime
 		select iif(isnull(PARSENAME([val],2),PARSENAME([val],1))='*',-1,isnull(PARSENAME([val],2),PARSENAME([val],1)))
@@ -252,7 +267,7 @@ begin
 
 		declare @indColInSelect nvarchar(max)
 		select @indColInSelect = STUFF((
-		select (',' + ' case when ''' + s.name + ''' = ''pop'' then round([' + s.name + '],0) else round([' + s.name + '],10) end  [' + s.name + ']') as [text()]
+		select (',' + ' case when ''' + s.name + ''' = ''pop'' then round([' + s.name + '],0) else dbo.fix([' + s.name + '],4) end  [' + s.name + ']') as [text()]
 		from #whereind s
 		for xml path ('')),1,1,'')
 
@@ -492,6 +507,11 @@ begin
 		set @dropT = 'drop table [' + ('FactFinal' + @newId) + ']'
 		IF OBJECT_ID('FactFinal' + @newId + '', 'U') IS NOT NULL
 			exec(@dropT)
+
+		update LogRequest
+		set [Status] = 1
+		,EndTime = getdate()
+		where QueryUniqueID = @newId
 	end try
 	begin catch
 		select null geo, ERROR_MESSAGE() [geo.name], null [time]
@@ -504,11 +524,6 @@ GO
 
 execute StatsQuery 
 '
-<root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>geo.name</SELECT><SELECT>geo.cat</SELECT>
-<SELECT>geo.region</SELECT>
-<SELECT>incomeMount_shape_stack_region</SELECT>
-<SELECT>incomeMount_shape_stack_all</SELECT><WHERE><geo>*</geo>
-<geo.cat>region</geo.cat><time>2000</time><quantity /></WHERE><FROM>spreedsheet</FROM></query>
-<lang>en</lang></root>
+<root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>gdp_per_cap</SELECT><WHERE><geo>swe</geo><geo>nor</geo><geo>fin</geo><geo>bra</geo><geo>usa</geo><geo>chn</geo><geo.cat>country</geo.cat><time>1852-1996</time><quantity /></WHERE><FROM>spreedsheet</FROM></query><lang>en</lang></root>
 '
 
