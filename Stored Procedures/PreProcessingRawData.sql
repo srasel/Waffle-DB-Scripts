@@ -18,9 +18,11 @@ CREATE PROCEDURE [dbo].[Preprocessrawdata]
 AS 
   BEGIN 
       
-	  SET nocount ON; 
+	  SET NOCOUNT ON; 
 
 	  EXECUTE [dbo].[PreProcessSpreedSheetData]
+	  EXECUTE [dbo].[PreProcessWDIData]
+	  EXECUTE [dbo].[PreProcessSubNationalData]
 	  EXECUTE [dbo].[ProcessFinalTables]
       
   END 
