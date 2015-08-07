@@ -24,7 +24,7 @@ BEGIN
 				,@rawDataFileLocation VARCHAR(100)
 				,@wdiCountryData VARCHAR(100)
 	
-		SET @baseFolderLocation = N'D:\gapminder\Output\WDI\'
+		SET @baseFolderLocation = N'C:\Users\shahnewaz\Documents\GapMinder_DEV\wdi\'
 		SET @rawDataFileLocation = @baseFolderLocation + 'AllWDIRawData.txt';
 		SET @wdiCountryData = @baseFolderLocation + 'Data\WDI_Country.csv';
 		

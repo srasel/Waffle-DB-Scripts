@@ -1,6 +1,3 @@
-USE [GapMinder]
-GO
-
 /****** Object:  StoredProcedure [dbo].[StatsQuery]    Script Date: 7/7/2015 4:47:31 AM ******/
 DROP PROCEDURE [dbo].[StatsQuery]
 GO
@@ -33,6 +30,20 @@ begin
 	declare @dropT nvarchar(max)
 	declare @newId nvarchar(max)
 	set @newId = newid()
+
+	declare @availableDataLevel table (ds nvarchar(max), lev int)
+	insert into @availableDataLevel
+	select 'SpreedSheet',3
+	union all
+	select 'SubNational',4
+	union all
+	select 'WDI',3
+	union all
+	select 'IMF',3
+	union all
+	select 'ChartBook',3
+	union all
+	select 'humnum',3
 
 	declare @factTable nvarchar(max)
 	set @factTable = 'FactFinal'
@@ -306,7 +317,8 @@ begin
 			geo.rnk rnk
 			from (select *,case when cat ='planet' then 1 
 				when cat = 'region' then 2
-				when cat = 'country' then 3 end rnk from DimGeo) geo 
+				when cat = 'country' then 3 
+				when cat = 'territory' then 4 end rnk from DimGeo) geo 
 			inner join #wheregeo wg on geo.id = wg.name
 
 			union all
@@ -320,17 +332,19 @@ begin
 			c.rnk+1
 			from (select *,case when cat ='planet' then 1 
 				when cat = 'region' then 2
-				when cat = 'country' then 3 end rnk from DimGeo) g inner join cte c
+				when cat = 'country' then 3 
+				when cat = 'territory' then 4 end rnk from DimGeo) g inner join cte c
 			on g.region = c.id
 		)
 		select dc.ID, c.par [Country Code], c.parId [Short Name], c.region, c.cat [category]
 		into #geoFinal 
 		from dimCountry dc 
-		left join (select * from cte where rnk = (select max(rnk) from cte)) c 
+		left join (select * from cte 
+					where rnk in (select lev from @availableDataLevel a inner join #from f
+									on a.ds = f.tab)
+		) c 
 		on dc.[Short Name] = c.name
-		where c.name is not null 
-	
-		--select * from #geoFinal
+		where c.name is not null
 
 		DECLARE @parmDefinition nvarchar(500);
 		set @parmDefinition = N'@start int, @end int'
@@ -524,6 +538,23 @@ GO
 
 execute StatsQuery 
 '
-<root><query><SELECT>geo</SELECT><SELECT>time</SELECT><SELECT>gdp_per_cap</SELECT><WHERE><geo>swe</geo><geo>nor</geo><geo>fin</geo><geo>bra</geo><geo>usa</geo><geo>chn</geo><geo.cat>country</geo.cat><time>1852-1996</time><quantity /></WHERE><FROM>spreedsheet</FROM></query><lang>en</lang></root>
+<root>
+  <query>
+    <SELECT>geo</SELECT>
+    <SELECT>geo.region</SELECT>
+    <SELECT>time</SELECT>
+    <SELECT>poverty_headcount_ratio_at_national_poverty_line_(%_of_population)</SELECT>
+    <SELECT>co2_per_capita</SELECT>
+    <WHERE>
+      <geo>*</geo>
+      <geo.cat>country</geo.cat>
+      <time>1990-2015</time>
+      <quantity />
+    </WHERE>
+    <FROM>spreedsheet</FROM>
+  </query>
+  <lang>en</lang>
+</root>
 '
+
 

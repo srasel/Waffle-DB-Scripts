@@ -23,8 +23,9 @@ AS
 	  EXECUTE [dbo].[PreProcessSpreedSheetData]
 	  EXECUTE [dbo].[PreProcessWDIData]
 	  EXECUTE [dbo].[PreProcessSubNationalData]
+	  EXECUTE [dbo].[PreProcessShapeFile]
 	  EXECUTE [dbo].[ProcessFinalTables]
-      
+
   END 
 GO
 

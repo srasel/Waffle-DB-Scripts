@@ -16,8 +16,9 @@ BEGIN
 		DECLARE @dyn_sql NVARCHAR(max)
 				,@baseFolderLocation VARCHAR(100)
 				,@rawDataFileLocation VARCHAR(100)
+				,@maxRowCount int
 	
-		SET @baseFolderLocation = N'D:\gapminder\Output\SubNational\'
+		SET @baseFolderLocation = N'C:\Users\shahnewaz\Documents\GapMinder_DEV\subnational\'
 		SET @rawDataFileLocation = @baseFolderLocation + 'AllSubNationalRawData.txt';
 		
 		DROP TABLE dbo.SubNationalData
@@ -57,6 +58,27 @@ BEGIN
 									  Charindex(';', [country name], 1) - 1), 
 							  '"' 
 							  , '') 
-		WHERE  Charindex(';', [country name], 1) > 1 
+		WHERE  Charindex(';', [country name], 1) > 1
+
+		DROP TABLE [dbo].[SubNationalIndicator] 
+
+		CREATE TABLE [dbo].[SubNationalIndicator]
+		( 
+			[id]        INT NULL, 
+			[indicator] [VARCHAR](max) NULL 
+		) 
+		ON [PRIMARY] 
+		textimage_on [PRIMARY] 
+
+		SET @maxRowCount = (SELECT MAX(ID) FROM DimIndicators)
+
+		INSERT INTO [dbo].[SubNationalIndicator] 
+		SELECT Row_number() OVER (ORDER BY [indicator name]) 
+				+ @maxRowCount           ID, 
+				[indicator name] indicator 
+		FROM   (SELECT [indicator name] 
+				FROM   dbo.SubNationalData 
+				GROUP  BY [indicator name])A 
+
 END
 GO
