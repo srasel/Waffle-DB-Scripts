@@ -1,4 +1,5 @@
 /****** Object:  StoredProcedure [dbo].[StatsQuery]    Script Date: 7/7/2015 4:47:31 AM ******/
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[StatsQuery]') AND type in (N'P', N'PC'))
 DROP PROCEDURE [dbo].[StatsQuery]
 GO
 
@@ -9,534 +10,566 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-CREATE procedure [dbo].[StatsQuery]
-@xml xml
-as
-begin
-	SET NOCOUNT ON;
-	--select [Type] Geo, [Country Code] Name, ID [Time], ID [Value] from DimCountry
-	declare @XmlStr xml
-	set @XmlStr = @xml
-	
-	create table #select  (name varchar(100))
-	create table #wheregeo (name varchar(100))
-	create table #wheretime (minTime int, maxTime int)
-	create table #whereind (name varchar(100))
-	create table #wherecat (name varchar(100))
-	
-	create table #from (tab varchar(100))
-
-	declare @dyn_sql nvarchar(max)
-	declare @dropT nvarchar(max)
-	declare @newId nvarchar(max)
-	set @newId = newid()
-
-	declare @availableDataLevel table (ds nvarchar(max), lev int)
-	insert into @availableDataLevel
-	select 'SpreedSheet',3
-	union all
-	select 'SubNational',4
-	union all
-	select 'WDI',3
-	union all
-	select 'IMF',3
-	union all
-	select 'ChartBook',3
-	union all
-	select 'humnum',3
-
-	declare @factTable nvarchar(max)
-	set @factTable = 'FactFinal'
-
-	begin try
+CREATE PROCEDURE [dbo].[StatsQuery]
+@XML XML
+AS
+BEGIN
+		SET NOCOUNT ON;
 		
-		insert into LogRequest([QueryUniqueID],[InputXML])
-		select @newId, @xml
+		DECLARE @XmlStr XML
+				,@dyn_sql NVARCHAR(MAX)
+				,@dropT NVARCHAR(MAX)
+				,@newId NVARCHAR(MAX)
+				,@factTable NVARCHAR(MAX)
+				,@start INT
+				,@END INT
+				,@counter INT
+				,@measure VARCHAR(20)
+				,@reportData INT
 
-		insert into #select
-		select x.col.value('.', 'varchar(100)') AS [text()]
-		FROM @XmlStr.nodes('//root//query//SELECT') x(col)
+		DECLARE @availableDataLevel TABLE (ds NVARCHAR(MAX), cat NVARCHAR(100),lev INT)
+		
+		CREATE TABLE #SELECT  (name VARCHAR(100))
+		CREATE TABLE #wheregeo (name VARCHAR(100))
+		CREATE TABLE #wheretime (minTime INT, maxTime INT)
+		CREATE TABLE #whereind (name VARCHAR(100))
+		CREATE TABLE #wherecat (name VARCHAR(100))
+		CREATE TABLE #FROM (tab VARCHAR(100))
+		CREATE TABLE #time (period INT)
+		
+		/*
+			history of data level available for each source
+		*/
+		INSERT INTO @availableDataLevel
+		SELECT 'SpreedSheet','country', 3
+		UNION ALL
+		SELECT 'SubNational','country',3
+		UNION ALL
+		SELECT 'SubNational','territory', 4
+		UNION ALL
+		SELECT 'WDI','country',3
+		UNION ALL
+		SELECT 'IMF','country',3
+		UNION ALL
+		SELECT 'ChartBook','country',3
+		UNION ALL
+		SELECT 'humnum','country',3
+		
+		SET @XmlStr = @XML
+		SET @newId = NEWID()
 
-		--select * from #select 
+		SET @factTable = 'FactFinal'
 
-		select s.* into #A 
-		from #select s left join vDimDetails d
-		on s.name = d.[-t-id]
-		where d.[-t-id] is null
+		BEGIN TRY
+		
+			INSERT INTO LogRequest([QueryUniqueID],[InputXML])
+			SELECT @newId, @XML
 
-		--select * from #A
+			-- extract the values under SELECT
+			INSERT INTO #SELECT
+			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
+			FROM @XmlStr.nodes('//root//query//SELECT') x(col)
 
-		if(@@ROWCOUNT = 0 or (select count(*) from #A)=0)
-		begin
-			--insert into #select
-			--select 'ind' [Indicator Code] 
-			execute GeoEntitiesQuery @xml
+			/*
+				transform reporting column to actual db column i.e. 
+				geo -> [Country Code]
+				geo.name -> [Short Name]
+			*/
+			SELECT s.* INTO #A 
+			FROM #SELECT s LEFT JOIN vDimDetails d
+			ON s.name = d.[-t-id]
+			WHERE d.[-t-id] IS NULL
+
+			/*
+				if SELECT does not contain any measure column
+				so, asking for Geo Dimension ???
+			*/
+			IF(@@ROWCOUNT = 0 or (SELECT COUNT(*) FROM #A)=0)
+			BEGIN
+				
+				EXECUTE GeoEntitiesQuery @XML
 			
-			update LogRequest
-			set [Status] = 1
-			,EndTime = getdate()
-			where QueryUniqueID = @newId
+				UPDATE LogRequest
+				SET [Status] = 1
+				,EndTime = getdate()
+				WHERE QueryUniqueID = @newId
 
-			return
-			--from DimIndicators
-			--where [Indicator Code] like 'pop'
-			--or [Indicator Code] like 'gdp'
-			--or [Indicator Code] like 'lex'
-		end
+				RETURN
+			END
 
-		if((select count(*) from #select where name like 'incomeMount_shape_stack_%') > 0)
-		begin
-			execute IncomeMountainQuery @xml
+			/*
+				Shape file reporting.
+				by pass from main system ???
+			*/
+			IF((SELECT COUNT(*) FROM #SELECT WHERE name LIKE 'incomeMount_shape_stack_%') > 0)
+			BEGIN
+				EXECUTE IncomeMountainQuery @XML
 
-			update LogRequest
-			set [Status] = 1
-			,EndTime = getdate()
-			where QueryUniqueID = @newId
+				UPDATE LogRequest
+				SET [Status] = 1
+				,EndTime = getdate()
+				WHERE QueryUniqueID = @newId
 
-			return
-		end
+				RETURN
+			END
 
-		;WITH cte AS (
-			SELECT *, 
-				row_number() OVER(PARTITION BY name ORDER BY name) AS [rn]
-			FROM #select
-		)
-		DELETE cte WHERE [rn] > 1
-
-		insert into #wherecat
-		select x.col.value('.', 'varchar(100)') AS [text()]
-		FROM @XmlStr.nodes('//root//query//WHERE//geo.cat') x(col)
-	
-		insert into #wheregeo
-		select x.col.value('.', 'varchar(100)') AS [text()]
-		FROM @XmlStr.nodes('//root//query//WHERE//geo') x(col)
-
-		if(@@ROWCOUNT = 0 or (select top 1 name from #wheregeo)='*')
-			begin
-				truncate table #wheregeo
-				if((select count(*) from #wherecat)>0)
-					begin
-						insert into #wheregeo
-						select id [Country Code] from DimGeo g inner join #wherecat wc on g.cat = wc.name
-					end
-				else
-					begin
-						insert into #wheregeo
-						select id [Country Code] from DimGeo --where cat = (select top 1 * from #wherecat)
-					end
-			end
-		else
-			begin
-				if((select count(*) from #wherecat)>0 and (select top 1 name from #wherecat)!='')
-					begin
-						--select * from #wherecat
-						;with cte (id, cat, rnk)as
-						(
-							select cast(id as nvarchar(255)) id 
-							,cast(cat as nvarchar(255))cat 
-							,geo.rnk rnk
-							from (select *,case when cat ='planet' then 1 
-								when cat = 'region' then 2
-								when cat = 'country' then 3 end rnk from DimGeo) geo 
-							inner join #wheregeo wg on geo.id = wg.name
-
-							union all
-
-							select g.id
-							,g.cat
-							,c.rnk+1
-							from (select *,case when cat ='planet' then 1 
-								when cat = 'region' then 2
-								when cat = 'country' then 3 end rnk from DimGeo) g 
-							inner join cte c on g.region = c.id
-						)
-						select c.id into #wheregeotemp from cte c inner join #wherecat wc on c.cat = wc.name
-					
-						truncate table #wheregeo
-						insert into #wheregeo
-						select * from #wheregeotemp
-
-					end
-			end
-	
-		insert into #wheretime
-		select iif(isnull(PARSENAME([val],2),PARSENAME([val],1))='*',-1,isnull(PARSENAME([val],2),PARSENAME([val],1)))
-		, iif(PARSENAME([val],1)='*',-1,PARSENAME([val],1))
-		from (
-		select replace([text()],'-','.') val from (
-			select x.col.value('.', 'varchar(100)') AS [text()]
-			FROM @XmlStr.nodes('//root//query//WHERE//time') x(col)
-			)A
-		)B
-
-		if(@@ROWCOUNT = 0 or (select top 1 minTime from #wheretime)='-1')
-		begin
-			truncate table #wheretime
-			insert into #wheretime
-			select min(period),max(period) from DimTime
-		end
-
-		--select * from #wheretime
-
-		declare @start int
-		declare @end int
-		declare @counter int
-
-		create table #time (period int)
-
-		select @start = minTime, @end = maxTime from #wheretime
-		set @counter = @start
-
-		while @counter <= @end 
-		begin
-			insert into #time
-			select @counter
-			set @counter = @counter + 1;
-		end
-		--;with cte(period) as
-		--(
-		--	select minTime from #wheretime
-		--	union all
-		--	select c.period + 1
-		--	from cte c
-		--	where c.period < (select maxTime from #wheretime)
-		--)
-		--select * into #time
-		--from cte;
-
-		--select * from #time order by period
-	
-		insert into #whereind
-		select s.name
-		from #select s left join vDimDetails d
-		on s.name = d.[-t-id]
-		where d.[-t-id] is null
-
-		declare @measure varchar(20)
-		select @measure = name from #select where name like 'age%'
-
-		declare @kount int
-		select @kount = count(*) from #select where name like 'age%'or name like 'pop%'
-
-		if(@kount > 1)
-		begin
-			truncate table #whereind
-			insert into #whereind
-			select [Indicator Code] from DimIndicators
-			where [Indicator Code] like case when len(@measure) > 3 then @measure + '%' else 'age_group%' end
-		end
-
-		--select * from #whereind
-
-	
-		insert into #from
-		select x.col.value('.', 'varchar(100)') AS [text()]
-		FROM @XmlStr.nodes('//root//query//FROM') x(col)
-
-		update #from
-		set tab = 'spreedsheet'
-		where tab = 'humnum'
-	
-		declare @colInFinalSelect nvarchar(max)
-		select @colInFinalSelect = STUFF((
-		select (',' + '([' + s.name + ']) ['  + s.name +']'  ) as [text()]
-		from #select s left join vDimDetails dd
-		on dd.[-t-id] = s.name
-		where dd.cName is not null
-		for xml path ('')),1,1,'')
-		--select @dCols
-
-		--select * from #select
-		if((select count(*) from #select where name like 'age_group%')>=1)
-		begin
-			select @colInFinalSelect = coalesce(@colInFinalSelect+', '''+  replace(s.name,'age_group_','Age Group ') +''' [' + s.name + ']',@colInFinalSelect)
-			from #select s where s.name like 'age_group%' 
-		end
-
-		--select @colInFinalSelect
-
-		declare @colInQuerySelection nvarchar(max)
-		select @colInQuerySelection = STUFF((
-		select (',' + dd.cName + '[' + s.name + ']' ) as [text()]
-		from #select s left join vDimDetails dd
-		on dd.[-t-id] = s.name
-		for xml path ('')),1,1,'')
-	
-		declare @colInGroupBy nvarchar(max)
-		select @colInGroupBy = STUFF((
-		select (',' + dd.cName ) as [text()]
-		from #select s left join vDimDetails dd
-		on dd.[-t-id] = s.name
-		for xml path ('')),1,1,'')
-
-
-		declare @indCol nvarchar(max)
-		select @indCol = STUFF((
-		select (',' +  ' [' + s.name +']') as [text()]
-		from #whereind s
-		for xml path ('')),1,1,'')
-
-		declare @indColInSelect nvarchar(max)
-		select @indColInSelect = STUFF((
-		select (',' + ' case when ''' + s.name + ''' = ''pop'' then round([' + s.name + '],0) else dbo.fix([' + s.name + '],4) end  [' + s.name + ']') as [text()]
-		from #whereind s
-		for xml path ('')),1,1,'')
-
-		--select @indColInSelect
-	
-		declare @interimSelect varchar(100)
-		set @interimSelect = '[Indicator Code]'
-
-		if(@kount > 1)
-		begin
-			set @indCol = '[pop]'
-			set @indColInSelect = '[pop]'
-			set @interimSelect = '''pop'''
-		end
-	
-
-		--if(@@ROWCOUNT = 0 or (select top 1 name from #wherecat)='')
-		--begin
-		--	truncate table #wherecat
-		--	insert into #wherecat
-		--	select 'country'
-		--end
-
-		--select * from #wherecat
-		--select * from #wheregeo
-
-		--select * from #wheregeo
-		;with cte (id, name, par, parId, cat, region, rnk)as
-		(
-			select cast(id as nvarchar(255)) id, 
-			cast(geo.name as nvarchar(255)) name,
-			geo.id par,
-			geo.name parId, 
-			cast(cat as nvarchar(255))cat,
-			geo.region,
-			geo.rnk rnk
-			from (select *,case when cat ='planet' then 1 
-				when cat = 'region' then 2
-				when cat = 'country' then 3 
-				when cat = 'territory' then 4 end rnk from DimGeo) geo 
-			inner join #wheregeo wg on geo.id = wg.name
-
-			union all
-
-			select g.id, 
-			g.name,
-			c.par  par,
-			c.parId parId, 
-			c.cat, 
-			c.region,
-			c.rnk+1
-			from (select *,case when cat ='planet' then 1 
-				when cat = 'region' then 2
-				when cat = 'country' then 3 
-				when cat = 'territory' then 4 end rnk from DimGeo) g inner join cte c
-			on g.region = c.id
-		)
-		select dc.ID, c.par [Country Code], c.parId [Short Name], c.region, c.cat [category]
-		into #geoFinal 
-		from dimCountry dc 
-		left join (select * from cte 
-					where rnk in (select lev from @availableDataLevel a inner join #from f
-									on a.ds = f.tab)
-		) c 
-		on dc.[Short Name] = c.name
-		where c.name is not null
-
-		DECLARE @parmDefinition nvarchar(500);
-		set @parmDefinition = N'@start int, @end int'
-
-		IF OBJECT_ID('SumTable', 'U') IS NOT NULL
-			DROP TABLE dbo.SumTable 
-		if((select count(*) from #select where name in ('lex','gini'))>0
-			and 
-			(select name from #wherecat) <> 'country'
+			-- remove duplicate from SELECT list.
+			;WITH cte AS (
+				SELECT *, 
+					row_number() OVER(PARTITION BY name ORDER BY name) AS [rn]
+				FROM #SELECT
 			)
-		begin
-			set @dyn_sql = N'
-					select [DataSourceID],[Country Code], [Period], [Indicator Code],
-							[Value]/iif(isnull([SumValue],1)=0, 1, isnull([SumValue],1)) [Value]
-					into [FactFinal' + @newId + ']
-					from (
-						select par, A.[DataSourceID],A.[Country Code], A.[Period], A.[Indicator Code],
-								(isnull(A.value,0) * isnull(B.value,0)) [Value]
-								, sum(
-									iif(A.value is null, 0, 1) * B.value
-								) over(partition by par, A.[Period], A.[Indicator Code]) [SumValue]
-						--into [FactFinal' + @newId + ']
-						from (
-							select f.*,dc.[Country Code] par,dc.[Short Name] partID  from dbo.[' + @factTable + '] f 
-							left join (select * from #geoFinal) dc
-							on f.[Country Code] = dc.ID
-							left join ( select i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] from DimIndicators i left join #whereind w on i.[Indicator Code] = w.name where w.name is not null) di
-							on f.[Indicator Code] = di.ID
-							, #time t 
-							where dc.ID is not null
-							and f.DataSourceID = (select top 1 ID from DimDataSource inner join #from on DataSource = tab)
-							and di.ID is not null
-							and f.Period = t.period
-						)A left join
-						(
-							select f.* from dbo.[' + @factTable + '] f 
-							left join (select * from #geoFinal) dc
-							on f.[Country Code] = dc.ID
-							left join ( select i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] from DimIndicators i where [Indicator Code] = ''pop'') di
-							on f.[Indicator Code] = di.ID
-							, #time t 
-							where dc.ID is not null
-							and f.DataSourceID = (select top 1 ID from DimDataSource inner join #from on DataSource = tab)
-							and f.DataSourceID = di.DataSourceID
-							and di.ID is not null
-							and f.Period = t.period
-						) B 
-						on A.[DataSourceID] = B.[DataSourceID]
-						and A.[Country Code] = B.[Country Code]
-						and A.[Period] = B.[Period]
-					)C
-				'
-			execute sp_executesql @dyn_sql, @parmDefinition, @start = @start, @end = @end
-			--exec('select * from [FactFinal' + @newId + ']')
-			set @factTable = 'FactFinal' + @newId
-		end
+			DELETE cte WHERE [rn] > 1
 
-		set @dyn_sql = N'
-				select ' + @colInQuerySelection + ', sum(f.Value) val,  di.[Indicator Code]
-				into [SumTable' + @newId + ']
-				from dbo.[' + @factTable + '] f 
-				left join (select * from #geoFinal) dc
-				on f.[Country Code] = dc.ID
-				left join ( select i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] from DimIndicators i left join #whereind w on i.[Indicator Code] = w.name where w.name is not null) di
-				on f.[Indicator Code] = di.ID
-				, #time t --#wheretime t 
-				--on t.period = f.Period
-				where dc.ID is not null
-				and f.DataSourceID = (select top 1 ID from DimDataSource inner join #from on DataSource = tab)
-				and di.ID is not null
-				and f.Period = t.period--(Period >=t.minTime and Period <= t.maxTime)
-				--and f.Period between @start and @end
-				group by ' + @colInGroupBy + ', di.[Indicator Code]
-			'
-		--print @dyn_sql
-		execute sp_executesql @dyn_sql, @parmDefinition, @start = @start, @end = @end
+			-- extract geo.cat & geo from WHERE clause
+			INSERT INTO #wherecat
+			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
+			FROM @XmlStr.nodes('//root//query//WHERE//geo.cat') x(col)
+	
+			INSERT INTO #wheregeo
+			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
+			FROM @XmlStr.nodes('//root//query//WHERE//geo') x(col)
 
-		--exec('select * from [SumTable' + @newId + ']')
-		
+			/*
+				If no geo selected or geo='*' in WHERE clause
+			*/
+			IF(@@ROWCOUNT = 0 or (SELECT top 1 name FROM #wheregeo)='*')
+				BEGIN
+					
+					TRUNCATE TABLE #wheregeo
 
-		if(CHARINDEX('time',@colInQuerySelection,1)>0)
-		begin
-			declare @cols nvarchar(max)
-			select @cols =  stuff((select ',['+ COLUMN_NAME + ']'  from INFORMATION_SCHEMA.COLUMNS
-			where TABLE_NAME = 'SumTable' + @newId
-			and COLUMN_NAME not in ('time','val')
-			for xml path('')),1,1,'')
-			
-			set @dyn_sql = N'
-				insert into [SumTable' + @newId + '](' +  @cols + ', time, val)
-				select ' + @cols + ',period, NULL val
-				from [SumTable' + @newId + '], #time
-				group by ' + @cols + ', period
-			'
-			execute sp_executesql @dyn_sql
-			--select * from SumTable
+					-- category define? select that level from DimGeo
+					-- otherwise take all
+					IF((SELECT COUNT(*) FROM #wherecat)>0)
+						BEGIN
+							INSERT INTO #wheregeo
+							SELECT id [Country Code] FROM DimGeo g INNER JOIN #wherecat wc ON g.cat = wc.name
+						END
+					ELSE
+						BEGIN
+							INSERT INTO #wheregeo
+							SELECT id [Country Code] FROM DimGeo --WHERE cat = (SELECT top 1 * FROM #wherecat)
+						END
 
-			IF OBJECT_ID('WithAllData', 'U') IS NOT NULL
-				DROP TABLE dbo.WithAllData 
+				END
 
-			set @dyn_sql = N'
-				select ' + @cols + ',time,sum(val) val
-				into [WithAllData' + @newId + '] 
-				from [SumTable' + @newId + '] 
-				group by ' + @cols + ', time
-			'
-			execute sp_executesql @dyn_sql
-			--select * from WithAllData
-			
-			
-			set @dyn_sql = N'
-				select ' + @colInFinalSelect + ','  + @indColInSelect + ' 
-				from (
-					select ' + @colInFinalSelect + ', val, ' + @interimSelect + ' [Indicator Code]
-					from (
-							SELECT ' + @cols + ',[time]
-							,val=CASE
-								WHEN val IS NOT NULL THEN val
-								ELSE s + (1. * m / x) * (LEAD(val, n, s) OVER (partition by ' + @cols + ' ORDER BY [time]) -s)
-								END
-							FROM
+			/*
+				some values are there in geo={swe,nor} ..
+			*/
+			ELSE
+				BEGIN
+					/*
+						geo.cat define? 
+						if geo={eur, asi} and geo.cat='county'
+						we have to select the countries under eur, asi ..
+					*/
+					IF((SELECT COUNT(*) FROM #wherecat)>0 AND (SELECT top 1 name FROM #wherecat)!='')
+						BEGIN
+							--SELECT * FROM #wherecat
+							;WITH cte (id, cat, rnk)AS
 							(
-								SELECT ' + @cols + ',[time], val, s=MAX(val) OVER (PARTITION BY ' + @cols +',c)
-									,n=ROW_NUMBER() OVER (PARTITION BY ' + @cols +',c ORDER BY [time] DESC)
-									,m=ROW_NUMBER() OVER (PARTITION BY ' + @cols +',c ORDER BY [time]) - 1
-									,x=1 + COUNT(CASE WHEN val IS NULL THEN 1 END) OVER (PARTITION BY ' + @cols +',c)
+								SELECT CAST(id AS NVARCHAR(255)) id 
+								,CAST(cat AS NVARCHAR(255))cat 
+								,geo.rnk rnk
+								FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
+									WHEN cat = 'region' THEN 2
+									WHEN cat = 'country' THEN 3  
+									WHEN cat = 'territory' THEN 4 END rnk FROM DimGeo) geo 
+								INNER JOIN #wheregeo wg ON geo.id = wg.name
+
+								UNION ALL
+
+								SELECT g.id
+								,g.cat
+								,c.rnk+1
+								FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
+									WHEN cat = 'region' THEN 2
+									WHEN cat = 'country' THEN 3  
+									WHEN cat = 'territory' THEN 4 END rnk FROM DimGeo) g 
+								INNER JOIN cte c ON g.region = c.id
+							)
+							SELECT c.id INTO #wheregeotemp 
+							FROM cte c INNER JOIN #wherecat wc 
+							ON c.cat = wc.name
+					
+							TRUNCATE TABLE #wheregeo
+							INSERT INTO #wheregeo
+							SELECT * FROM #wheregeotemp
+
+						END
+
+				END
+	
+			-- extract time under WHERE clause
+			INSERT INTO #wheretime
+			SELECT iif(isnull(PARSENAME([val],2),PARSENAME([val],1))='*',-1,isnull(PARSENAME([val],2),PARSENAME([val],1)))
+			, iif(PARSENAME([val],1)='*',-1,PARSENAME([val],1))
+			FROM (
+			SELECT replace([text()],'-','.') val FROM (
+				SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
+				FROM @XmlStr.nodes('//root//query//WHERE//time') x(col)
+				)A
+			)B
+
+			-- only one time defined? 
+			-- time=2000 then make it a range time=[2000-2000]
+			IF(@@ROWCOUNT = 0 or (SELECT top 1 minTime FROM #wheretime)='-1')
+			BEGIN
+				TRUNCATE TABLE #wheretime
+				INSERT INTO #wheretime
+				SELECT min(period),MAX(period) FROM DimTime
+			END
+
+			-- for interpolation, we need to report all time
+			-- between two period range
+			SELECT @start = minTime, @END = maxTime FROM #wheretime
+			SET @counter = @start
+			while @counter <= @END 
+			BEGIN
+				INSERT INTO #time
+				SELECT @counter
+				SET @counter = @counter + 1;
+			END
+			
+			-- extract the indicator list from SELECT clause
+			INSERT INTO #whereind
+			SELECT s.name
+			FROM #SELECT s LEFT JOIN vDimDetails d
+			ON s.name = d.[-t-id]
+			WHERE d.[-t-id] IS NULL
+
+			/*
+				another hard-coded logic to handle
+				the age group functionality.
+			*/
+			SELECT @measure = name FROM #SELECT WHERE name LIKE 'age%'
+			DECLARE @kount INT
+			SELECT @kount = COUNT(*) FROM #SELECT WHERE name LIKE 'age%'or name LIKE 'pop%'
+
+			IF(@kount > 1)
+			BEGIN
+				TRUNCATE TABLE #whereind
+				INSERT INTO #whereind
+				SELECT [Indicator Code] FROM DimIndicators
+				WHERE [Indicator Code] LIKE CASE WHEN len(@measure) > 3 THEN @measure + '%' ELSE 'age_group%' END
+			END
+
+			-- extract FROM
+			INSERT INTO #FROM
+			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
+			FROM @XmlStr.nodes('//root//query//FROM') x(col)
+
+			UPDATE #FROM
+			SET tab = 'spreedsheet'
+			WHERE tab = 'humnum'
+	
+			/*
+				change the following logic
+			*/
+			SELECT @reportData = lev
+			FROM @availableDataLevel d 
+			INNER JOIN #FROM f ON d.ds = f.tab
+			LEFT JOIN #wherecat c ON d.cat = c.name
+			WHERE c.name IS NOT NULL
+
+			IF(@reportData IS NULL)
+			BEGIN
+				SELECT @reportData = MIN(lev)
+				FROM @availableDataLevel d 
+				INNER JOIN #FROM f ON d.ds = f.tab
+				GROUP BY d.ds
+			END
+
+			/*
+				create a cols list like
+				[Country Code] [geo], [Short Name] [geo.name]
+			*/
+			DECLARE @colInFinalSelect NVARCHAR(MAX)
+			SELECT @colInFinalSelect = STUFF((
+			SELECT (',' + '([' + s.name + ']) ['  + s.name +']'  ) AS [text()]
+			FROM #SELECT s LEFT JOIN vDimDetails dd
+			ON dd.[-t-id] = s.name
+			WHERE dd.cName IS NOT NULL
+			FOR XML PATH ('')),1,1,'')
+
+			-- handle age_group logic again?
+			IF((SELECT COUNT(*) FROM #SELECT WHERE name LIKE 'age_group%')>=1)
+			BEGIN
+				SELECT @colInFinalSelect = coalesce(@colInFinalSelect+', '''+  replace(s.name,'age_group_','Age Group ') +''' [' + s.name + ']',@colInFinalSelect)
+				FROM #SELECT s WHERE s.name LIKE 'age_group%' 
+			END
+
+			DECLARE @colInQuerySelection NVARCHAR(MAX)
+			SELECT @colInQuerySelection = STUFF((
+			SELECT (',' + dd.cName + '[' + s.name + ']' ) AS [text()]
+			FROM #SELECT s LEFT JOIN vDimDetails dd
+			ON dd.[-t-id] = s.name
+			FOR XML PATH ('')),1,1,'')
+	
+			DECLARE @colInGroupBy NVARCHAR(MAX)
+			SELECT @colInGroupBy = STUFF((
+			SELECT (',' + dd.cName ) AS [text()]
+			FROM #SELECT s LEFT JOIN vDimDetails dd
+			ON dd.[-t-id] = s.name
+			FOR XML PATH ('')),1,1,'')
+
+
+			DECLARE @indCol NVARCHAR(MAX)
+			SELECT @indCol = STUFF((
+			SELECT (',' +  ' [' + s.name +']') AS [text()]
+			FROM #whereind s
+			FOR XML PATH ('')),1,1,'')
+
+			DECLARE @indColInSelect NVARCHAR(MAX)
+			SELECT @indColInSelect = STUFF((
+			SELECT (',' + ' CASE WHEN ''' + s.name + ''' = ''pop'' THEN round([' + s.name + '],0) ELSE dbo.fix([' + s.name + '],4) END  [' + s.name + ']') AS [text()]
+			FROM #whereind s
+			FOR XML PATH ('')),1,1,'')
+
+			--SELECT @indColInSelect
+	
+			DECLARE @interimSelect VARCHAR(100)
+			SET @interimSelect = '[Indicator Code]'
+
+			IF(@kount > 1)
+			BEGIN
+				SET @indCol = '[pop]'
+				SET @indColInSelect = '[pop]'
+				SET @interimSelect = '''pop'''
+			END
+	
+			;WITH cte (id, name, par, parId, cat, region, rnk)AS
+			(
+				SELECT CAST(id AS NVARCHAR(255)) id, 
+				CAST(geo.name AS NVARCHAR(255)) name,
+				geo.id par,
+				geo.name parId, 
+				CAST(cat AS NVARCHAR(255))cat,
+				geo.region,
+				geo.rnk rnk
+				FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
+					WHEN cat = 'region' THEN 2
+					WHEN cat = 'country' THEN 3 
+					WHEN cat = 'territory' THEN 4 END rnk FROM DimGeo) geo 
+				INNER JOIN #wheregeo wg ON geo.id = wg.name
+
+				UNION ALL
+
+				SELECT g.id, 
+				g.name,
+				c.par  par,
+				c.parId parId, 
+				c.cat, 
+				c.region,
+				c.rnk+1
+				FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
+					WHEN cat = 'region' THEN 2
+					WHEN cat = 'country' THEN 3 
+					WHEN cat = 'territory' THEN 4 END rnk FROM DimGeo) g INNER JOIN cte c
+				ON g.region = c.id
+			)
+			SELECT dc.ID, c.par [Country Code], c.parId [Short Name], c.region, c.cat [category]
+			INTO #geoFinal 
+			FROM dimCountry dc 
+			LEFT JOIN (SELECT * FROM cte 
+						WHERE rnk = @reportData--(SELECT lev FROM @availableDataLevel a INNER JOIN #FROM f ON a.ds = f.tab)
+			) c 
+			ON dc.[Short Name] = c.name
+			WHERE c.name IS NOT NULL
+
+			DECLARE @parmDefinition NVARCHAR(500);
+			SET @parmDefinition = N'@start INT, @END INT'
+
+			IF OBJECT_ID('SumTable', 'U') IS NOT NULL
+				DROP TABLE dbo.SumTable
+
+			-- for lex, gini: we need to do weighted avg.
+			IF((SELECT COUNT(*) FROM #SELECT WHERE name in ('lex','gini'))>0
+				AND 
+				(SELECT name FROM #wherecat) <> 'country'
+				)
+			BEGIN
+				SET @dyn_sql = N'
+						SELECT [DataSourceID],[Country Code], [Period], [Indicator Code],
+								[Value]/iif(isnull([SumValue],1)=0, 1, isnull([SumValue],1)) [Value]
+						INTO [FactFinal' + @newId + ']
+						FROM (
+							SELECT par, A.[DataSourceID],A.[Country Code], A.[Period], A.[Indicator Code],
+									(isnull(A.value,0) * isnull(B.value,0)) [Value]
+									, sum(
+										iif(A.value IS NULL, 0, 1) * B.value
+									) over(partition by par, A.[Period], A.[Indicator Code]) [SumValue]
+							--INTO [FactFinal' + @newId + ']
+							FROM (
+								SELECT f.*,dc.[Country Code] par,dc.[Short Name] partID  FROM dbo.[' + @factTable + '] f 
+								LEFT JOIN (SELECT * FROM #geoFinal) dc
+								ON f.[Country Code] = dc.ID
+								LEFT JOIN ( SELECT i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] FROM DimIndicators i LEFT JOIN #whereind w ON i.[Indicator Code] = w.name WHERE w.name IS NOT NULL) di
+								ON f.[Indicator Code] = di.ID
+								, #time t 
+								WHERE dc.ID IS NOT NULL
+								AND f.DataSourceID = (SELECT top 1 ID FROM DimDataSource INNER JOIN #FROM ON DataSource = tab)
+								AND di.ID IS NOT NULL
+								AND f.Period = t.period
+							)A LEFT JOIN
+							(
+								SELECT f.* FROM dbo.[' + @factTable + '] f 
+								LEFT JOIN (SELECT * FROM #geoFinal) dc
+								ON f.[Country Code] = dc.ID
+								LEFT JOIN ( SELECT i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] FROM DimIndicators i WHERE [Indicator Code] = ''pop'') di
+								ON f.[Indicator Code] = di.ID
+								, #time t 
+								WHERE dc.ID IS NOT NULL
+								AND f.DataSourceID = (SELECT top 1 ID FROM DimDataSource INNER JOIN #FROM ON DataSource = tab)
+								AND f.DataSourceID = di.DataSourceID
+								AND di.ID IS NOT NULL
+								AND f.Period = t.period
+							) B 
+							ON A.[DataSourceID] = B.[DataSourceID]
+							AND A.[Country Code] = B.[Country Code]
+							AND A.[Period] = B.[Period]
+						)C
+					'
+				EXECUTE SP_EXECUTESQL @dyn_sql, @parmDefinition, @start = @start, @END = @END
+				--exec('SELECT * FROM [FactFinal' + @newId + ']')
+				SET @factTable = 'FactFinal' + @newId
+			END
+
+			SET @dyn_sql = N'
+					SELECT ' + @colInQuerySelection + ', sum(f.Value) val,  di.[Indicator Code]
+					INTO [SumTable' + @newId + ']
+					FROM dbo.[' + @factTable + '] f 
+					LEFT JOIN (SELECT * FROM #geoFinal) dc
+					ON f.[Country Code] = dc.ID
+					LEFT JOIN ( SELECT i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] FROM DimIndicators i LEFT JOIN #whereind w ON i.[Indicator Code] = w.name WHERE w.name IS NOT NULL) di
+					ON f.[Indicator Code] = di.ID
+					, #time t --#wheretime t 
+					--ON t.period = f.Period
+					WHERE dc.ID IS NOT NULL
+					AND f.DataSourceID = (SELECT top 1 ID FROM DimDataSource INNER JOIN #FROM ON DataSource = tab)
+					AND di.ID IS NOT NULL
+					AND f.Period = t.period--(Period >=t.minTime AND Period <= t.maxTime)
+					--AND f.Period between @start AND @END
+					group by ' + @colInGroupBy + ', di.[Indicator Code]
+				'
+			--print @dyn_sql
+			EXECUTE SP_EXECUTESQL @dyn_sql, @parmDefinition, @start = @start, @END = @END
+
+			--exec('SELECT * FROM [SumTable' + @newId + ']')
+		
+			
+			IF(CHARINDEX('time',@colInQuerySelection,1)>0)
+			BEGIN
+				DECLARE @cols NVARCHAR(MAX)
+				SELECT @cols =  stuff((SELECT ',['+ COLUMN_NAME + ']'  FROM INFORMATION_SCHEMA.COLUMNS
+				WHERE TABLE_NAME = 'SumTable' + @newId
+				AND COLUMN_NAME NOT in ('time','val')
+				FOR XML PATH('')),1,1,'')
+			
+				SET @dyn_sql = N'
+					INSERT INTO [SumTable' + @newId + '](' +  @cols + ', time, val)
+					SELECT ' + @cols + ',period, NULL val
+					FROM [SumTable' + @newId + '], #time
+					group by ' + @cols + ', period
+				'
+				EXECUTE SP_EXECUTESQL @dyn_sql
+				--SELECT * FROM SumTable
+
+				IF OBJECT_ID('WithAllData', 'U') IS NOT NULL
+					DROP TABLE dbo.WithAllData 
+
+				SET @dyn_sql = N'
+					SELECT ' + @cols + ',time,sum(val) val
+					INTO [WithAllData' + @newId + '] 
+					FROM [SumTable' + @newId + '] 
+					group by ' + @cols + ', time
+				'
+				EXECUTE SP_EXECUTESQL @dyn_sql
+				--SELECT * FROM WithAllData
+			
+			
+				SET @dyn_sql = N'
+					SELECT ' + @colInFinalSelect + ','  + @indColInSelect + ' 
+					FROM (
+						SELECT ' + @colInFinalSelect + ', val, ' + @interimSelect + ' [Indicator Code]
+						FROM (
+								SELECT ' + @cols + ',[time]
+								,val=CASE
+									WHEN val IS NOT NULL THEN val
+									ELSE s + (1. * m / x) * (LEAD(val, n, s) OVER (partition by ' + @cols + ' ORDER BY [time]) -s)
+									END
 								FROM
 								(
-									SELECT ' + @cols + ',[time], val
-										,c=COUNT(val) OVER (partition by ' + @cols + ' ORDER BY time)
-									FROM [WithAllData' + @newId + '] 
+									SELECT ' + @cols + ',[time], val, s=MAX(val) OVER (PARTITION BY ' + @cols +',c)
+										,n=ROW_NUMBER() OVER (PARTITION BY ' + @cols +',c ORDER BY [time] DESC)
+										,m=ROW_NUMBER() OVER (PARTITION BY ' + @cols +',c ORDER BY [time]) - 1
+										,x=1 + COUNT(CASE WHEN val IS NULL THEN 1 END) OVER (PARTITION BY ' + @cols +',c)
+									FROM
+									(
+										SELECT ' + @cols + ',[time], val
+											,c=COUNT(val) OVER (partition by ' + @cols + ' ORDER BY time)
+										FROM [WithAllData' + @newId + '] 
+									) a
 								) a
-							) a
-					) b --where val > 0
-				)A 
-				pivot
-				(
-					sum(val)
-					for [Indicator Code] in (' + @indCol + ')
-				) as pvt
-			'
-			--print @dyn_sql
-			execute sp_executesql @dyn_sql
+						) b --WHERE val > 0
+					)A 
+					pivot
+					(
+						sum(val)
+						FOR [Indicator Code] in (' + @indCol + ')
+					) AS pvt
+				'
+				--print @dyn_sql
+				EXECUTE SP_EXECUTESQL @dyn_sql
 
-		end
+			END
 
-		else
-		begin
-			set @dyn_sql = N'
-				select ' + @colInFinalSelect + ','  + @indColInSelect + ' 
-				from (
-					select ' + @colInFinalSelect + ', val, ' + @interimSelect + ' [Indicator Code]
-					from (
-							select * from [SumTable' + @newId + ']
-					) b --where val > 0
-				)A 
-				pivot
-				(
-					sum(val)
-					for [Indicator Code] in (' + @indCol + ')
-				) as pvt
-			'
-			execute sp_executesql @dyn_sql
+			ELSE
+			BEGIN
+				SET @dyn_sql = N'
+					SELECT ' + @colInFinalSelect + ','  + @indColInSelect + ' 
+					FROM (
+						SELECT ' + @colInFinalSelect + ', val, ' + @interimSelect + ' [Indicator Code]
+						FROM (
+								SELECT * FROM [SumTable' + @newId + ']
+						) b --WHERE val > 0
+					)A 
+					pivot
+					(
+						sum(val)
+						FOR [Indicator Code] in (' + @indCol + ')
+					) AS pvt
+				'
+				EXECUTE SP_EXECUTESQL @dyn_sql
 			
 			
-		end
+			END
 
-		set @dropT = 'drop table [' + ('SumTable' + @newId) + ']'
-		IF OBJECT_ID('SumTable' + @newId + '', 'U') IS NOT NULL
-			exec(@dropT)
-		set @dropT = 'drop table [' + ('WithAllData' + @newId) + ']'
-		IF OBJECT_ID('WithAllData' + @newId + '', 'U') IS NOT NULL
-			exec(@dropT)
-		set @dropT = 'drop table [' + ('FactFinal' + @newId) + ']'
-		IF OBJECT_ID('FactFinal' + @newId + '', 'U') IS NOT NULL
-			exec(@dropT)
+			SET @dropT = 'drop TABLE [' + ('SumTable' + @newId) + ']'
+			IF OBJECT_ID('SumTable' + @newId + '', 'U') IS NOT NULL
+				exec(@dropT)
+			SET @dropT = 'drop TABLE [' + ('WithAllData' + @newId) + ']'
+			IF OBJECT_ID('WithAllData' + @newId + '', 'U') IS NOT NULL
+				exec(@dropT)
+			SET @dropT = 'drop TABLE [' + ('FactFinal' + @newId) + ']'
+			IF OBJECT_ID('FactFinal' + @newId + '', 'U') IS NOT NULL
+				exec(@dropT)
 
-		update LogRequest
-		set [Status] = 1
-		,EndTime = getdate()
-		where QueryUniqueID = @newId
-	end try
-	begin catch
-		select null geo, ERROR_MESSAGE() [geo.name], null [time]
-	end catch
+			UPDATE LogRequest
+			SET [Status] = 1
+			,EndTime = getdate()
+			WHERE QueryUniqueID = @newId
+		END TRY
+		BEGIN CATCH
+			SELECT NULL geo, ERROR_MESSAGE() [geo.name], NULL [time]
+		END CATCH
 
-end
+END
 
 
 GO
 
-execute StatsQuery 
+EXECUTE StatsQuery 
 '
 <root>
   <query>
@@ -551,7 +584,7 @@ execute StatsQuery
       <time>1990-2015</time>
       <quantity />
     </WHERE>
-    <FROM>spreedsheet</FROM>
+    <FROM>subnational</FROM>
   </query>
   <lang>en</lang>
 </root>
