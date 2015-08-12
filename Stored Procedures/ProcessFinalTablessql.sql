@@ -70,6 +70,15 @@ BEGIN
 		SELECT 3, 'N/A' [Indicator Code], id.indicator, id.ID 
 		FROM dbo.SubNationalIndicator id
 
+		UNION ALL
+		
+		SELECT 4, 
+				indicator, 
+				indicator, 
+				NULL 
+		FROM   imfrawfile 
+		GROUP  BY indicator 
+
 		UPDATE [dbo].[DimIndicators]
 		SET [Indicator Code] = LEFT(LOWER(REPLACE([Indicator Name],' ', '_')),99)
 
@@ -128,6 +137,24 @@ BEGIN
 					  ON fd.[country code] = dc.[country code] 
 		WHERE  di.id IS NOT NULL 
 			   AND dc.id IS NOT NULL 
+
+		UNION ALL
+
+		SELECT 4, 
+             dc.id, 
+             LEFT(r.[time], 4), 
+             di.id, 
+             CASE 
+               WHEN r.indicator = 'pop' THEN r.[value] * 1000000 
+               ELSE r.[value] 
+             END 
+		  FROM   imfrawfile r 
+				 LEFT JOIN (SELECT * 
+							FROM   dimindicators 
+							WHERE  datasourceid = 4) di 
+						ON r.indicator = di.[indicator code] 
+				 LEFT JOIN dimcountry dc 
+						ON r.geo = dc.[country code] 
 
 		CREATE NONCLUSTERED INDEX ix_fact 
 		ON factfinal ([datasourceid], [country code], [period], [indicator code]) 

@@ -580,7 +580,7 @@ EXECUTE StatsQuery
     <SELECT>co2_per_capita</SELECT>
     <WHERE>
       <geo>*</geo>
-      <geo.cat>country</geo.cat>
+      <geo.cat>territory</geo.cat>
       <time>1990-2015</time>
       <quantity />
     </WHERE>
