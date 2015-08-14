@@ -54,6 +54,18 @@ BEGIN
 		SELECT 'ChartBook','country',3
 		UNION ALL
 		SELECT 'humnum','country',3
+
+		UNION ALL
+		SELECT 'devinfo','country',3
+		UNION ALL
+		SELECT 'devinfo','province',4
+		UNION ALL
+		SELECT 'devinfo','territory',5
+		UNION ALL
+		SELECT 'devinfo','sub territory',6
+		UNION ALL
+		SELECT 'devinfo','brick',7
+
 		
 		SET @XmlStr = @XML
 		SET @newId = NEWID()
@@ -174,7 +186,11 @@ BEGIN
 								FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
 									WHEN cat = 'region' THEN 2
 									WHEN cat = 'country' THEN 3  
-									WHEN cat = 'territory' THEN 4 END rnk FROM DimGeo) geo 
+									WHEN cat = 'province' THEN 4
+									WHEN cat = 'territory' THEN 5
+									WHEN cat = 'sub territory' THEN 6 
+									WHEN cat = 'brick' THEN 7
+									END rnk FROM DimGeo) geo 
 								INNER JOIN #wheregeo wg ON geo.id = wg.name
 
 								UNION ALL
@@ -185,7 +201,11 @@ BEGIN
 								FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
 									WHEN cat = 'region' THEN 2
 									WHEN cat = 'country' THEN 3  
-									WHEN cat = 'territory' THEN 4 END rnk FROM DimGeo) g 
+									WHEN cat = 'province' THEN 4
+									WHEN cat = 'territory' THEN 5
+									WHEN cat = 'sub territory' THEN 6 
+									WHEN cat = 'brick' THEN 7
+									END rnk FROM DimGeo) g 
 								INNER JOIN cte c ON g.region = c.id
 							)
 							SELECT c.id INTO #wheregeotemp 
@@ -337,7 +357,7 @@ BEGIN
 				SET @indColInSelect = '[pop]'
 				SET @interimSelect = '''pop'''
 			END
-	
+
 			;WITH cte (id, name, par, parId, cat, region, rnk)AS
 			(
 				SELECT CAST(id AS NVARCHAR(255)) id, 
@@ -348,9 +368,13 @@ BEGIN
 				geo.region,
 				geo.rnk rnk
 				FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
-					WHEN cat = 'region' THEN 2
-					WHEN cat = 'country' THEN 3 
-					WHEN cat = 'territory' THEN 4 END rnk FROM DimGeo) geo 
+									WHEN cat = 'region' THEN 2
+									WHEN cat = 'country' THEN 3  
+									WHEN cat = 'province' THEN 4
+									WHEN cat = 'territory' THEN 5
+									WHEN cat = 'sub territory' THEN 6 
+									WHEN cat = 'brick' THEN 7
+									END rnk FROM DimGeo) geo 
 				INNER JOIN #wheregeo wg ON geo.id = wg.name
 
 				UNION ALL
@@ -363,9 +387,13 @@ BEGIN
 				c.region,
 				c.rnk+1
 				FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
-					WHEN cat = 'region' THEN 2
-					WHEN cat = 'country' THEN 3 
-					WHEN cat = 'territory' THEN 4 END rnk FROM DimGeo) g INNER JOIN cte c
+									WHEN cat = 'region' THEN 2
+									WHEN cat = 'country' THEN 3  
+									WHEN cat = 'province' THEN 4
+									WHEN cat = 'territory' THEN 5
+									WHEN cat = 'sub territory' THEN 6 
+									WHEN cat = 'brick' THEN 7
+									END rnk FROM DimGeo) g INNER JOIN cte c
 				ON g.region = c.id
 			)
 			SELECT dc.ID, c.par [Country Code], c.parId [Short Name], c.region, c.cat [category]
@@ -452,7 +480,6 @@ BEGIN
 					--AND f.Period between @start AND @END
 					group by ' + @colInGroupBy + ', di.[Indicator Code]
 				'
-			--print @dyn_sql
 			EXECUTE SP_EXECUTESQL @dyn_sql, @parmDefinition, @start = @start, @END = @END
 
 			--exec('SELECT * FROM [SumTable' + @newId + ']')
@@ -569,25 +596,26 @@ END
 
 GO
 
-EXECUTE StatsQuery 
+execute StatsQuery
 '
 <root>
   <query>
     <SELECT>geo</SELECT>
-    <SELECT>geo.region</SELECT>
     <SELECT>time</SELECT>
-    <SELECT>poverty_headcount_ratio_at_national_poverty_line_(%_of_population)</SELECT>
-    <SELECT>co2_per_capita</SELECT>
+    <SELECT>geo.name</SELECT>
+    <SELECT>geo.region</SELECT>
+    <SELECT>gni</SELECT>
+    <SELECT>area</SELECT>
+    <SELECT>urban</SELECT>
     <WHERE>
       <geo>*</geo>
-      <geo.cat>territory</geo.cat>
+      <geo.cat>sub territory</geo.cat>
       <time>1990-2015</time>
       <quantity />
     </WHERE>
-    <FROM>subnational</FROM>
+    <FROM>devinfo</FROM>
   </query>
   <lang>en</lang>
 </root>
 '
-
 

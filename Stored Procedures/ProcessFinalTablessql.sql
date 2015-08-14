@@ -77,10 +77,24 @@ BEGIN
 				indicator, 
 				NULL 
 		FROM   imfrawfile 
-		GROUP  BY indicator 
+		GROUP  BY indicator
+
+		UNION ALL
+
+		SELECT 6, 
+				Indicator,
+				Indicator,
+				NULL
+		FROM AllDevInfoRawData
+		GROUP BY Indicator
 
 		UPDATE [dbo].[DimIndicators]
 		SET [Indicator Code] = LEFT(LOWER(REPLACE([Indicator Name],' ', '_')),99)
+
+		INSERT INTO DimSubGroup (SubGroup)
+		SELECT SUBGROUP
+		FROM AllDevInfoRawData
+		GROUP BY Subgroup
 
 		DROP INDEX ix_fact ON FactFinal
 
@@ -156,8 +170,30 @@ BEGIN
 				 LEFT JOIN dimcountry dc 
 						ON r.geo = dc.[country code] 
 
+		
+			INSERT INTO factfinal 
+					([datasourceid], 
+					[country code], 
+					period, 
+					[indicator code], 
+					SubGroup,
+					[value]) 
+			SELECT 6,c.ID, r.Year, i.ID, s.ID, r.DataValue
+			FROM AllDevInfoRawData r 
+			LEFT JOIN (
+				SELECT * FROM DimIndicators WHERE DataSourceID = 6
+			) i
+				on r.Indicator = i.[Indicator Name]
+			LEFT JOIN DimSubGroup s
+				on r.Subgroup = s.SubGroup
+			LEFT JOIN DimCountry c
+				on r.AreaCode = c.[Country Code]
+			where i.id is not null
+			and c.id is not null
+
+
 		CREATE NONCLUSTERED INDEX ix_fact 
-		ON factfinal ([datasourceid], [country code], [period], [indicator code]) 
+		ON factfinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
 		INCLUDE([Value])
 		
 		
