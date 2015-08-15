@@ -20,102 +20,147 @@ AS
 BEGIN
 		SET NOCOUNT ON;
 		
+		--DROP TABLE #A
 		SELECT Area, AreaCode
 		INTO #A
 		FROM [GapMinder_Dev_Maeenul].dbo.AllDevInfoRawData 
 		GROUP BY Area, AreaCode
 
-		DROP TABLE ZGeo
-		SELECT * INTO ZGeo
-		FROM #A
-
 		--DROP TABLE #C
-		SELECT Area, AreaCode INTO #C
-		FROM ZGeo g inner join DimCountry c
-		on left(areacode,3) = c.[Country Code]
-		WHERE ISNUMERIC(left(AreaCode, 3)) = 0
-
+		SELECT Area, AreaCode,c.lev,c.cat INTO #C
+		FROM #A g LEFT JOIN (
+			SELECT * FROM DimGeo WHERE cat = 'country'
+		) c
+		ON LEFT(areacode,3) = c.id
+		WHERE ISNUMERIC(LEFT(AreaCode, 3)) = 0
+		AND C.ID IS NOT NULL
+		
 		--DROP TABLE #B
+		SELECT CAST(LEFT(areacode,3) AS VARCHAR(100)) iso
+			, 3 l, 1 rnk, CAST('country' AS VARCHAR(100)) cat
+			INTO #B
+		FROM #A
+		WHERE ISNUMERIC(LEFT(areacode,3)) = 0
+		AND LEN(AreaCode) = 3
+		group by LEFT(areacode,3)
+
+		INSERT INTO #B
 		SELECT *,
 		CASE rnk WHEN 1 THEN 'province'
 				WHEN 2 THEN 'territory'
 				WHEN 3 THEN 'sub territory'
 				WHEN 4 THEN 'brick' end cat
-		INTO #B
 		FROM (
 		SELECT iso, l, row_number() OVER(PARTITION BY iso ORDER BY l) rnk 
 		FROM (
-		SELECT DENSE_RANK() OVER(PARTITION BY left(areacode,3), len(areacode) ORDER BY area)
-		rnk,
-		len(areacode) l, 
-		left(areacode,3) iso, *
-		FROM ZGeo
-		WHERE isnumeric(left(areacode,3)) = 0
-		)A WHERE rnk = 1
+			SELECT DENSE_RANK() OVER(PARTITION BY LEFT(areacode,3), LEN(areacode) ORDER BY area)
+			rnk,
+			LEN(areacode) l, 
+			LEFT(areacode,3) iso, *
+			FROM #A
+			WHERE ISNUMERIC(LEFT(areacode,3)) = 0
+			AND LEN(AreaCode) > 3
+			)A WHERE rnk = 1
 		)B
-		--ORDER BY AreaCode, l
-
-		--SELECT * FROM DimGeo
-
+		
+		--SELECT * FROM #B
+		--SELECT * FROM #C
 		;WITH cte (code,name,parent,rnk, cat)
-		as
+		AS
 		(
-			SELECT cast(areacode as varchar(100)), cast(area as varchar(100)), cast(b.iso as varchar(100)), b.rnk
+			SELECT CAST(areacode AS VARCHAR(100)), CAST(area AS VARCHAR(100)), CAST(b.iso AS VARCHAR(100)), b.rnk
 			,b.cat
 			FROM #C c inner join #B b
-			on len(c.areacode) = b.l
-			and left(c.areacode, b.l) like b.iso + '%'
-			WHERE b.rnk = 1
+			ON LEN(c.areacode) = b.l
+			AND LEFT(c.areacode, b.l) LIKE b.iso + '%'
+			WHERE b.cat = 'province'
 
-			union all
+			UNION ALL
 
-			SELECT cast(areacode as varchar(100)), cast(area as varchar(100)), cast(ct.code as varchar(100)), ct.rnk + 1
+			SELECT CAST(areacode AS VARCHAR(100)), CAST(area AS VARCHAR(100)), CAST(ct.code AS VARCHAR(100)), ct.rnk + 1
 			,b.cat
 			FROM #C c inner join cte ct
-			on c.areacode like ct.code + '%'
+			ON c.areacode LIKE ct.code + '%'
 			inner join #B b
-			on len(c.areacode) = b.l
-			and left(c.areacode, b.l) like b.iso + '%'
+			ON LEN(c.areacode) = b.l
+			AND LEFT(c.areacode, b.l) LIKE b.iso + '%'
 			WHERE b.rnk = ct.rnk + 1
-			and ct.rnk < 6
+			AND ct.rnk < 7
 		)
+		
+		SELECT 'geo' dim,code id, name, parent region,cat, g.GeoLevelNo lev, 
+				NULL lat, NULL long
+				INTO #final
+		FROM cte c INNER JOIN GeoHierarchyLevel g
+		ON c.cat = g.GeoLevelName
 
-		--SELECT area, AreaCode
-		--FROM #A
-		--except
+		MERGE DimGeo T
+		USING (
+			SELECT * FROM #final
+		) S
+		ON (T.id = S.id AND T.cat = S.cat)
+		WHEN NOT MATCHED BY TARGET THEN 
+			INSERT(dim,id,name,region,cat,lev) 
+			VALUES(S.dim,LOWER(S.id),S.name,LOWER(S.region),S.cat,S.lev)
+		
+		--WHEN MATCHED 
+		--	THEN UPDATE SET T.EmployeeName = S.EmployeeName
+		--WHEN NOT MATCHED BY SOURCE
+		--	THEN DELETE 
+			--OUTPUT $action, inserted.*, deleted.*
+		;
 
-		INSERT INTO DimGeo
-		SELECT 'geo', code, name, parent,cat, NULL, NULL
-		FROM cte
-		WHERE len(code) > 3
-
-		;WITH cte (code,name,parent,rnk, cat)
-		as
-		(
-			SELECT cast(areacode as varchar(100)), cast(area as varchar(100)), cast(b.iso as varchar(100)), b.rnk
-			,b.cat
-			FROM #C c inner join #B b
-			on len(c.areacode) = b.l
-			and left(c.areacode, b.l) like b.iso + '%'
-			WHERE b.rnk = 1
-
-			union all
-
-			SELECT cast(areacode as varchar(100)), cast(area as varchar(100)), cast(ct.code as varchar(100)), ct.rnk + 1
-			,b.cat
-			FROM #C c inner join cte ct
-			on c.areacode like ct.code + '%'
-			inner join #B b
-			on len(c.areacode) = b.l
-			and left(c.areacode, b.l) like b.iso + '%'
-			WHERE b.rnk = ct.rnk + 1
-			and ct.rnk < 6
-		)
-
+		TRUNCATE TABLE dbo.DimCountry
 		INSERT INTO dbo.DimCountry([Type],[Country Code],[Short Name], [Country Name])
-		SELECT cat, code, name, name
-		FROM cte
-		WHERE len(code) > 3
+		SELECT cat,id,name,name
+		FROM DimGeo
+		ORDER BY lev
+
+		INSERT INTO DimSubGroup (SubGroup)
+		SELECT SUBGROUP
+		FROM AllDevInfoRawData
+		GROUP BY Subgroup
+
+
+		DELETE FROM [dbo].[DimIndicators]
+		WHERE DataSourceID = 6
+
+		INSERT INTO DimIndicators([DataSourceID],[Indicator Code], [Indicator Name])
+		SELECT 6,LEFT(LOWER(REPLACE(indicator,' ', '_')),99), indicator 
+		FROM [GapMinder_Dev_Maeenul].dbo.AllDevInfoRawData 
+		GROUP BY Indicator
+
+		select top 2 * from [GapMinder_Dev_Maeenul].dbo.AllDevInfoRawData 
+		
+		DROP INDEX ix_fact ON FactFinal
+
+		DELETE FROM FactFinal
+		WHERE DataSourceID = 6
+
+		INSERT INTO factfinal 
+					([datasourceid], 
+					[country code], 
+					period, 
+					[indicator code], 
+					SubGroup,
+					[value]) 
+		SELECT 6,c.ID, r.Year, i.ID, s.ID, r.DataValue
+		FROM [GapMinder_Dev_Maeenul].dbo.AllDevInfoRawData  r 
+		LEFT JOIN (
+			SELECT * FROM DimIndicators WHERE DataSourceID = 6
+		) i
+			ON r.Indicator = i.[Indicator Name]
+		LEFT JOIN DimSubGroup s
+			ON r.Subgroup = s.SubGroup
+		LEFT JOIN DimCountry c
+			ON r.AreaCode = c.[Country Code]
+		WHERE i.id IS NOT NULL
+		AND c.id IS NOT NULL
+		AND S.ID IS NOT NULL
+
+		CREATE NONCLUSTERED INDEX ix_fact 
+		ON factfinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
+		INCLUDE([Value])
 
 END
 

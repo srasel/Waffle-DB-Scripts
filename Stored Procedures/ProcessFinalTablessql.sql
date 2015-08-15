@@ -24,8 +24,13 @@ BEGIN
 		TRUNCATE TABLE dbo.DimCountry
 
 		INSERT INTO dbo.DimCountry([Type],[Country Code],[Short Name], [Country Name])
-			SELECT	'geo', [Country Code],[Short Name], [Long Name] 
-			FROM	dbo.WDI_Country
+		SELECT cat,id,name,name
+		FROM DimGeo
+		ORDER BY lev
+
+		INSERT INTO dbo.DimCountry([Type],[Country Code],[Short Name], [Country Name])
+			SELECT 'geo', [Country Code],[Short Name], [Long Name] 
+			FROM dbo.WDI_Country
 			GROUP BY [Country Code],[Short Name], [Long Name]
 
 		INSERT INTO dbo.DimCountry([Type],[Country Code],[Short Name], [Country Name])
@@ -79,22 +84,8 @@ BEGIN
 		FROM   imfrawfile 
 		GROUP  BY indicator
 
-		UNION ALL
-
-		SELECT 6, 
-				Indicator,
-				Indicator,
-				NULL
-		FROM AllDevInfoRawData
-		GROUP BY Indicator
-
 		UPDATE [dbo].[DimIndicators]
 		SET [Indicator Code] = LEFT(LOWER(REPLACE([Indicator Name],' ', '_')),99)
-
-		INSERT INTO DimSubGroup (SubGroup)
-		SELECT SUBGROUP
-		FROM AllDevInfoRawData
-		GROUP BY Subgroup
 
 		DROP INDEX ix_fact ON FactFinal
 
@@ -162,35 +153,13 @@ BEGIN
                WHEN r.indicator = 'pop' THEN r.[value] * 1000000 
                ELSE r.[value] 
              END 
-		  FROM   imfrawfile r 
-				 LEFT JOIN (SELECT * 
-							FROM   dimindicators 
-							WHERE  datasourceid = 4) di 
-						ON r.indicator = di.[indicator code] 
-				 LEFT JOIN dimcountry dc 
-						ON r.geo = dc.[country code] 
-
-		
-			INSERT INTO factfinal 
-					([datasourceid], 
-					[country code], 
-					period, 
-					[indicator code], 
-					SubGroup,
-					[value]) 
-			SELECT 6,c.ID, r.Year, i.ID, s.ID, r.DataValue
-			FROM AllDevInfoRawData r 
-			LEFT JOIN (
-				SELECT * FROM DimIndicators WHERE DataSourceID = 6
-			) i
-				on r.Indicator = i.[Indicator Name]
-			LEFT JOIN DimSubGroup s
-				on r.Subgroup = s.SubGroup
-			LEFT JOIN DimCountry c
-				on r.AreaCode = c.[Country Code]
-			where i.id is not null
-			and c.id is not null
-
+		FROM   imfrawfile r 
+				LEFT JOIN (SELECT * 
+						FROM   dimindicators 
+						WHERE  datasourceid = 4) di 
+					ON r.indicator = di.[indicator code] 
+				LEFT JOIN dimcountry dc 
+					ON r.geo = dc.[country code] 
 
 		CREATE NONCLUSTERED INDEX ix_fact 
 		ON factfinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
