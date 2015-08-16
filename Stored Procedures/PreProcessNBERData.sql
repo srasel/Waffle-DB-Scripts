@@ -22,7 +22,7 @@ BEGIN
 		--DROP TABLE #y
 		SELECT n.CountryCode, n.Region
 			INTO #y
-		FROM [GapMinder_Dev_Maeenul].[dbo].[NBERRawData] n
+		FROM [dbo].[NBERRawData] n
 		INNER JOIN DimGeo g
 		ON n.CountryCode = g.id
 		GROUP BY CountryCode, n.Region
@@ -69,7 +69,7 @@ BEGIN
 
 		INSERT INTO DimIndicators([DataSourceID],[Indicator Code], [Indicator Name])
 		SELECT 8,LEFT(LOWER(REPLACE(indicator,' ', '_')),99), indicator 
-		FROM [GapMinder_Dev_Maeenul].[dbo].[NBERRawData]
+		FROM [dbo].[NBERRawData]
 		GROUP BY Indicator
 
 		DROP INDEX ix_fact ON FactFinal
@@ -86,7 +86,7 @@ BEGIN
 		SELECT 8, r.ID, r.Period, i.ID, IIF(ISNUMERIC(r.DataValue)=1,r.DataValue,NULL)
 		FROM ( 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator 
-			FROM [GapMinder_Dev_Maeenul].[dbo].[NBERRawData] hr
+			FROM [dbo].[NBERRawData] hr
 			LEFT JOIN DimCountry dc
 			ON hr.CountryCode = dc.[Country Code]
 			WHERE dc.[Country Code] IS NOT NULL
@@ -95,7 +95,7 @@ BEGIN
 			UNION ALL
 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator  
-			FROM [GapMinder_Dev_Maeenul].[dbo].[NBERRawData] hr
+			FROM [dbo].[NBERRawData] hr
 			LEFT JOIN #final f
 			ON hr.Region = F.name
 			AND hr.CountryCode = f.region

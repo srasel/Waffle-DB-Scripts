@@ -23,7 +23,7 @@ BEGIN
 		--DROP TABLE #A
 		SELECT Area, AreaCode
 		INTO #A
-		FROM [GapMinder_Dev_Maeenul].dbo.AllDevInfoRawData 
+		FROM dbo.AllDevInfoRawData 
 		GROUP BY Area, AreaCode
 
 		--DROP TABLE #C
@@ -127,11 +127,9 @@ BEGIN
 
 		INSERT INTO DimIndicators([DataSourceID],[Indicator Code], [Indicator Name])
 		SELECT 6,LEFT(LOWER(REPLACE(indicator,' ', '_')),99), indicator 
-		FROM [GapMinder_Dev_Maeenul].dbo.AllDevInfoRawData 
+		FROM dbo.AllDevInfoRawData 
 		GROUP BY Indicator
 
-		select top 2 * from [GapMinder_Dev_Maeenul].dbo.AllDevInfoRawData 
-		
 		DROP INDEX ix_fact ON FactFinal
 
 		DELETE FROM FactFinal
@@ -145,7 +143,7 @@ BEGIN
 					SubGroup,
 					[value]) 
 		SELECT 6,c.ID, r.Year, i.ID, s.ID, r.DataValue
-		FROM [GapMinder_Dev_Maeenul].dbo.AllDevInfoRawData  r 
+		FROM dbo.AllDevInfoRawData  r 
 		LEFT JOIN (
 			SELECT * FROM DimIndicators WHERE DataSourceID = 6
 		) i

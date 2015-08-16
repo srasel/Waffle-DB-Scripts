@@ -64,24 +64,20 @@ BEGIN
 				GROUP  BY [indicator name]
 		)A
 		
-		TRUNCATE TABLE dbo.FactWDIData
+		DROP INDEX myindexwdi ON dbo.WDI_FactData
+		
+		TRUNCATE TABLE dbo.WDI_FactData
 
-		DROP INDEX myindexwdi ON dbo.FactWDIData
-		INSERT INTO dbo.FactWDIData
+		INSERT INTO dbo.WDI_FactData
 		SELECT	wi.id 
 				,wd.[country name]
-				,CASE 
-				   WHEN ISNUMERIC([period]) = 1 THEN [period] 
-				   ELSE NULL 
-				END
-				,CASE 
-					WHEN ISNUMERIC([value]) = 1 THEN Cast([value] AS FLOAT) 
-					ELSE NULL 
-				END 
+				,TRY_CONVERT(int, [period])
+				,TRY_CONVERT(float, [value])
 		FROM	dbo.WDI_Data wd LEFT JOIN dbo.WDI_Indicator wi 
 				ON wd.[indicator name] = wi.[indicator] 
+
 		CREATE CLUSTERED INDEX myindexwdi 
-		ON dbo.FactWDIData (pathid)
+		ON dbo.WDI_FactData (pathid)
 		
 END
 

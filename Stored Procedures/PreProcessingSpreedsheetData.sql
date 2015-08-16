@@ -1,7 +1,4 @@
-USE [GapMinder_DEV]
-GO
-
-/****** Object:  StoredProcedure [dbo].[PreProcessSpreedSheetData]    Script Date: 7/29/2015 3:50:13 PM ******/
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[PreProcessSpreedSheetData]') AND type in (N'P', N'PC'))
 DROP PROCEDURE [dbo].[PreProcessSpreedSheetData]
 GO
 
@@ -54,24 +51,10 @@ BEGIN
 			,[id] = ISNULL([id],'N/A')
 			,[scale] =ISNULL([scale],'N/A')
 
-
-		TRUNCATE TABLE dbo.allRawData;
+		TRUNCATE TABLE dbo.SpreedSheetIndicator 
 		SET @dyn_sql = 
 			N'
-				BULK INSERT dbo.allRawData 
-				FROM  '''  + @rawDataFileLocation + '''
-				WITH 
-					( 
-					fieldterminator = '','', 
-					rowterminator = ''\n'' 
-					)
-			'
-		EXECUTE sp_executesql @dyn_sql
-
-		TRUNCATE TABLE dbo.Indicator 
-		SET @dyn_sql = 
-			N'
-				BULK INSERT dbo.Indicator 
+				BULK INSERT dbo.SpreedSheetIndicator 
 				FROM ''' + @indicatorFileLocation + ''' 
 				WITH 
 					( 
@@ -87,28 +70,34 @@ BEGIN
 						OVER( 
 							partition BY indicator 
 							ORDER BY indicator) rnk 
-				FROM   dbo.Indicator)A 
+				FROM   dbo.SpreedSheetIndicator)A 
 		WHERE  rnk > 1
 
-		DROP INDEX myindex ON FactData 
+		TRUNCATE TABLE dbo.SpreedSheetAllRawData;
+		SET @dyn_sql = 
+			N'
+				BULK INSERT dbo.SpreedSheetAllRawData 
+				FROM  '''  + @rawDataFileLocation + '''
+				WITH 
+					( 
+					fieldterminator = '','', 
+					rowterminator = ''\n'' 
+					)
+			'
+		EXECUTE sp_executesql @dyn_sql
+
+		DROP INDEX myindex ON dbo.SpreedSheetFactData 
 		
-		TRUNCATE TABLE FactData 
-		
-		INSERT INTO FactData 
+		TRUNCATE TABLE dbo.SpreedSheetFactData 
+		INSERT INTO dbo.SpreedSheetFactData 
 		SELECT [filelocation], 
 				[pathid], 
-				[country], 
-				CASE 
-					WHEN ISNUMERIC([period]) = 1 THEN [period] 
-					ELSE NULL 
-				END, 
-				CASE 
-					WHEN ISNUMERIC([value]) = 1 THEN Cast([value] AS FLOAT) 
-					ELSE NULL 
-				END 
-		FROM   [dbo].[allRawData] 
+				[country],
+				TRY_CONVERT(int, [period]),
+				TRY_CONVERT(float, [value])
+		FROM   [dbo].[SpreedSheetAllRawData] 
 
-		CREATE CLUSTERED INDEX myindex ON FactData (pathid) 
+		CREATE CLUSTERED INDEX myindex ON dbo.SpreedSheetFactData (pathid) 
 END
 
 GO

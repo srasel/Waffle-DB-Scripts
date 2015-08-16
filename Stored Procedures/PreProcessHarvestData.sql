@@ -27,13 +27,13 @@ BEGIN
 				,CAST(NULL AS VARCHAR(100)) id
 				,CAST(ISO3 AS VARCHAR(100)) parent
 				,'province' cat 
-			FROM [GapMinder_Dev_Maeenul].[dbo].[HarvestChoiceRawData]
+			FROM [dbo].[HarvestChoiceRawData]
 			GROUP BY ADM0_NAME,ADM1_NAME_ALT,ISO3
 
 			UNION ALL
 
 			SELECT ADM2_NAME_ALT,ADM1_NAME_ALT, NULL, NULL, 'territory' 
-			FROM [GapMinder_Dev_Maeenul].[dbo].[HarvestChoiceRawData]
+			FROM [dbo].[HarvestChoiceRawData]
 			GROUP BY ADM2_NAME_ALT,ADM1_NAME_ALT
 		)A
 
@@ -104,7 +104,7 @@ BEGIN
 
 		INSERT INTO DimIndicators([DataSourceID],[Indicator Code], [Indicator Name])
 		SELECT 7,LEFT(LOWER(REPLACE(indicator,' ', '_')),99), indicator 
-		FROM [GapMinder_Dev_Maeenul].[dbo].[HarvestChoiceRawData]
+		FROM [dbo].[HarvestChoiceRawData]
 		GROUP BY Indicator
 		
 		DROP INDEX ix_fact ON FactFinal
@@ -121,7 +121,7 @@ BEGIN
 		SELECT 7, r.ID, r.Period, i.ID, IIF(ISNUMERIC(r.DataValue)=1,r.DataValue,NULL)
 		FROM ( 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator 
-			FROM [GapMinder_Dev_Maeenul].[dbo].[HarvestChoiceRawData] hr
+			FROM [dbo].[HarvestChoiceRawData] hr
 			LEFT JOIN DimCountry dc
 			ON hr.ISO3 = dc.[Country Code]
 			WHERE dc.[Country Code] IS NOT NULL
@@ -130,7 +130,7 @@ BEGIN
 			UNION ALL
 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator  
-			FROM [GapMinder_Dev_Maeenul].[dbo].[HarvestChoiceRawData] hr
+			FROM [dbo].[HarvestChoiceRawData] hr
 			LEFT JOIN #final f
 			ON hr.ADM1_NAME_ALT = F.name
 			AND hr.ISO3 = f.region
@@ -144,7 +144,7 @@ BEGIN
 			UNION ALL
 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator  
-			FROM [GapMinder_Dev_Maeenul].[dbo].[HarvestChoiceRawData] hr
+			FROM [dbo].[HarvestChoiceRawData] hr
 			LEFT JOIN #final f
 			ON hr.ADM2_NAME_ALT = F.name
 			LEFT JOIN DimCountry dc
