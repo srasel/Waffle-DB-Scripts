@@ -51,8 +51,6 @@ BEGIN
 		--DELETE FROM FactFinal
 		--WHERE DataSourceID = 4
 
-		
-
 		--CREATE NONCLUSTERED INDEX ix_fact 
 		--ON dbo.FactFinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
 		--INCLUDE([Value])

@@ -19,7 +19,6 @@ CREATE PROCEDURE [dbo].[PreProcessDevInfoData]
 AS
 BEGIN
 		SET NOCOUNT ON;
-		
 		--DROP TABLE #A
 		SELECT Area, AreaCode
 		INTO #A
@@ -101,26 +100,22 @@ BEGIN
 		ON (T.id = S.id AND T.cat = S.cat)
 		WHEN NOT MATCHED BY TARGET THEN 
 			INSERT(dim,id,name,region,cat,lev) 
-			VALUES(S.dim,LOWER(S.id),S.name,LOWER(S.region),S.cat,S.lev)
+			VALUES(S.dim,LOWER(S.id),S.name,LOWER(S.region),S.cat,S.lev);
 		
-		--WHEN MATCHED 
-		--	THEN UPDATE SET T.EmployeeName = S.EmployeeName
-		--WHEN NOT MATCHED BY SOURCE
-		--	THEN DELETE 
-			--OUTPUT $action, inserted.*, deleted.*
-		;
+		MERGE dbo.DimCountry T
+		USING (
+			SELECT * FROM #final
+		) S
+		ON (T.[Country Code] = S.id)
+		WHEN NOT MATCHED BY TARGET THEN 
+			INSERT([type],[Country Code],[Short Name],[Country Name]) 
+			VALUES(S.cat,LOWER(S.id),S.name,S.name);
 
-		TRUNCATE TABLE dbo.DimCountry
-		INSERT INTO dbo.DimCountry([Type],[Country Code],[Short Name], [Country Name])
-		SELECT cat,id,name,name
-		FROM DimGeo
-		ORDER BY lev
-
+		TRUNCATE TABLE DBO.DimSubGroup
 		INSERT INTO DimSubGroup (SubGroup)
 		SELECT SUBGROUP
 		FROM AllDevInfoRawData
 		GROUP BY Subgroup
-
 
 		DELETE FROM [dbo].[DimIndicators]
 		WHERE DataSourceID = 6
@@ -135,14 +130,14 @@ BEGIN
 		DELETE FROM FactFinal
 		WHERE DataSourceID = 6
 
-		INSERT INTO factfinal 
+		INSERT INTO FactFinal 
 					([datasourceid], 
 					[country code], 
 					period, 
 					[indicator code], 
 					SubGroup,
 					[value]) 
-		SELECT 6,c.ID, r.Year, i.ID, s.ID, r.DataValue
+		SELECT 6,c.ID, r.Year, i.ID, s.ID, TRY_CONVERT(float,r.DataValue)
 		FROM dbo.AllDevInfoRawData  r 
 		LEFT JOIN (
 			SELECT * FROM DimIndicators WHERE DataSourceID = 6

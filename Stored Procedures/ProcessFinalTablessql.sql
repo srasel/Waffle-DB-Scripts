@@ -19,6 +19,14 @@ AS
 BEGIN
 	
 		SET NOCOUNT ON;
+
+		;WITH CTE
+		AS
+		(
+			SELECT *, ROW_NUMBER() OVER (PARTITION BY id ORDER BY id) RNK
+			FROM DimGeo
+		)
+		DELETE FROM CTE WHERE RNK > 1
 		
 		TRUNCATE TABLE dbo.DimCountry
 
@@ -82,7 +90,6 @@ BEGIN
 
 		UPDATE [dbo].[DimIndicators]
 		SET [Indicator Code] = LEFT(LOWER(REPLACE([Indicator Name],' ', '_')),99)
-
 
 		DROP INDEX ix_fact ON FactFinal
 

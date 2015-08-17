@@ -1,4 +1,3 @@
-/****** Object:  StoredProcedure [dbo].[StatsQuery]    Script Date: 7/7/2015 4:47:31 AM ******/
 IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[StatsQuery]') AND type in (N'P', N'PC'))
 DROP PROCEDURE [dbo].[StatsQuery]
 GO
@@ -412,10 +411,20 @@ BEGIN
 				DROP TABLE dbo.SumTable
 
 			-- for lex, gini: we need to do weighted avg.
-			IF((SELECT COUNT(*) FROM #SELECT WHERE name in ('lex','gini'))>0
-				AND 
-				(SELECT name FROM #wherecat) <> 'country'
-				)
+			IF(
+				(
+					SELECT COUNT(*) 
+					FROM #SELECT WHERE 
+					name IN (SELECT Indicator FROM UtilityIndicatorCalculation WHERE CalType = 'weighted')
+				)>0
+				AND
+
+				(
+					SELECT COUNT(*) 
+					FROM #wherecat 
+					WHERE name IN ('planet','region')
+				)> 0 
+			)
 			BEGIN
 				SET @dyn_sql = N'
 						SELECT [DataSourceID],[Country Code], [Period], [Indicator Code],
@@ -604,16 +613,18 @@ execute StatsQuery
     <SELECT>time</SELECT>
     <SELECT>geo.name</SELECT>
     <SELECT>geo.region</SELECT>
-    <SELECT>gni</SELECT>
-    <SELECT>area</SELECT>
-    <SELECT>urban</SELECT>
+    <SELECT>lex</SELECT>
+    <SELECT>u5mr</SELECT>
+    <SELECT>gini</SELECT>
+    <SELECT>gdp_per_cap</SELECT>
+    <SELECT>pop</SELECT>
     <WHERE>
       <geo>*</geo>
-      <geo.cat>sub territory</geo.cat>
-      <time>1990-2015</time>
+      <geo.cat>country</geo.cat>
+      <time>1900-2015</time>
       <quantity />
     </WHERE>
-    <FROM>devinfo</FROM>
+    <FROM>spreedsheet</FROM>
   </query>
   <lang>en</lang>
 </root>

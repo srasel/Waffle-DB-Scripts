@@ -58,11 +58,16 @@ BEGIN
 			VALUES('geo',LOWER(S.id),S.name,LOWER(S.region),S.cat,S.lev);
 
 
-		TRUNCATE TABLE dbo.DimCountry
-		INSERT INTO dbo.DimCountry([Type],[Country Code],[Short Name], [Country Name])
-		SELECT cat,id,name,name
-		FROM DimGeo
-		ORDER BY lev
+		MERGE dbo.DimCountry T
+		USING (
+			SELECT f.*, g.[GeoLevelNo] lev
+			FROM #final f INNER JOIN [dbo].[GeoHierarchyLevel] g
+			ON f.cat = g.[GeoLevelName]
+		) S
+		ON (T.[Country Code] = S.id)
+		WHEN NOT MATCHED BY TARGET THEN 
+			INSERT([type],[Country Code],[Short Name],[Country Name]) 
+			VALUES(S.cat,LOWER(S.id),S.name,S.name);
 
 		DELETE FROM [dbo].[DimIndicators]
 		WHERE DataSourceID = 8
@@ -83,7 +88,7 @@ BEGIN
 					period, 
 					[indicator code], 
 					[value]) 
-		SELECT 8, r.ID, r.Period, i.ID, IIF(ISNUMERIC(r.DataValue)=1,r.DataValue,NULL)
+		SELECT 8, r.ID, r.Period, i.ID, TRY_CONVERT(float,r.DataValue)
 		FROM ( 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator 
 			FROM [dbo].[NBERRawData] hr

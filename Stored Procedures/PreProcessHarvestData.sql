@@ -46,7 +46,7 @@ BEGIN
 
 		UPDATE x
 		SET x.id = p.code
-		FROM #X x INNER JOIN province p
+		FROM #X x INNER JOIN UtilityProvince p
 		ON X.name = P.subdivision_name
 		WHERE x.cat = 'province'
 		AND id IS NULL
@@ -93,11 +93,14 @@ BEGIN
 			INSERT(dim,id,name,region,cat,lev) 
 			VALUES(S.dim,S.id,S.name,S.region,S.cat,S.lev);
 		
-		TRUNCATE TABLE dbo.DimCountry
-		INSERT INTO dbo.DimCountry([Type],[Country Code],[Short Name], [Country Name])
-		SELECT cat,id,name,name
-		FROM DimGeo
-		ORDER BY lev
+		MERGE dbo.DimCountry T
+		USING (
+			SELECT * FROM #final
+		) S
+		ON (T.[Country Code] = S.id)
+		WHEN NOT MATCHED BY TARGET THEN 
+			INSERT([type],[Country Code],[Short Name],[Country Name]) 
+			VALUES(S.cat,LOWER(S.id),S.name,S.name);
 
 		DELETE FROM [dbo].[DimIndicators]
 		WHERE DataSourceID = 7
@@ -118,7 +121,7 @@ BEGIN
 					period, 
 					[indicator code], 
 					[value]) 
-		SELECT 7, r.ID, r.Period, i.ID, IIF(ISNUMERIC(r.DataValue)=1,r.DataValue,NULL)
+		SELECT 7, r.ID, r.Period, i.ID, TRY_CONVERT(float,r.DataValue)
 		FROM ( 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator 
 			FROM [dbo].[HarvestChoiceRawData] hr

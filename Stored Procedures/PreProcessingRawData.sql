@@ -18,17 +18,36 @@ CREATE PROCEDURE [dbo].[Preprocessrawdata]
 AS 
   BEGIN 
       
-	  SET NOCOUNT ON; 
+		SET NOCOUNT ON;
+	  
+		/*
+		;WITH CTE
+		AS
+		(
+			SELECT *, ROW_NUMBER() OVER (PARTITION BY id ORDER BY id) RNK
+			FROM DimGeo
+		)
+		DELETE FROM CTE WHERE RNK > 1
+		*/
 
-	  EXECUTE [dbo].[PreProcessSpreedSheetData]
-	  EXECUTE [dbo].[PreProcessWDIData]
-	  EXECUTE [dbo].[PreProcessIMFData]
-	  --EXECUTE [dbo].[PreProcessSubNationalData]
-	  --EXECUTE [dbo].[PreProcessShapeFile]
-	  EXECUTE [dbo].[ProcessFinalTables]
-	  EXECUTE [dbo].[PreProcessDevInfoData]
-	  EXECUTE [dbo].[PreProcessHarvestData]
-	  EXECUTE [dbo].[PreProcessNBERData]
+		EXECUTE [dbo].[PreProcessSpreedSheetData]
+		EXECUTE [dbo].[PreProcessWDIData]
+		EXECUTE [dbo].[PreProcessIMFData]
+		--EXECUTE [dbo].[PreProcessSubNationalData]
+		--EXECUTE [dbo].[PreProcessShapeFile]
+		EXECUTE [dbo].[ProcessFinalTables]
+		EXECUTE [dbo].[PreProcessDevInfoData]
+		EXECUTE [dbo].[PreProcessHarvestData]
+		EXECUTE [dbo].[PreProcessNBERData]
+		EXECUTE [dbo].[PreProcessOPHIData]
+
+		UPDATE i
+		SET i.[Indicator Code] = r.IndicatorNameAfter
+		FROM DimIndicators i INNER JOIN UtilityRenameIndicator r
+		ON i.DataSourceID = r.DataSourceID
+		AND i.[Indicator Name] = r.IndicatorNameBefore
+
+		EXECUTE [dbo].[ProcessAdhocData]
 
   END 
 GO
