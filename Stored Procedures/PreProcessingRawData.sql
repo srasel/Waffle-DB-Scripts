@@ -19,7 +19,6 @@ AS
   BEGIN 
       
 		SET NOCOUNT ON;
-	  
 		/*
 		;WITH CTE
 		AS
@@ -29,6 +28,7 @@ AS
 		)
 		DELETE FROM CTE WHERE RNK > 1
 		*/
+		EXECUTE [dbo].[IndexAndConstraint] 'DROP'
 
 		EXECUTE [dbo].[PreProcessSpreedSheetData]
 		EXECUTE [dbo].[PreProcessWDIData]
@@ -48,6 +48,8 @@ AS
 		AND i.[Indicator Name] = r.IndicatorNameBefore
 
 		EXECUTE [dbo].[ProcessAdhocData]
+
+		EXECUTE [dbo].[IndexAndConstraint] 'CREATE'
 
   END 
 GO

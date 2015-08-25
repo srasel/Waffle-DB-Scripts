@@ -181,15 +181,8 @@ BEGIN
 							(
 								SELECT CAST(id AS NVARCHAR(255)) id 
 								,CAST(cat AS NVARCHAR(255))cat 
-								,geo.rnk rnk
-								FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
-									WHEN cat = 'region' THEN 2
-									WHEN cat = 'country' THEN 3  
-									WHEN cat = 'province' THEN 4
-									WHEN cat = 'territory' THEN 5
-									WHEN cat = 'sub territory' THEN 6 
-									WHEN cat = 'brick' THEN 7
-									END rnk FROM DimGeo) geo 
+								,geo.lev rnk
+								FROM DimGeo geo 
 								INNER JOIN #wheregeo wg ON geo.id = wg.name
 
 								UNION ALL
@@ -197,14 +190,7 @@ BEGIN
 								SELECT g.id
 								,g.cat
 								,c.rnk+1
-								FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
-									WHEN cat = 'region' THEN 2
-									WHEN cat = 'country' THEN 3  
-									WHEN cat = 'province' THEN 4
-									WHEN cat = 'territory' THEN 5
-									WHEN cat = 'sub territory' THEN 6 
-									WHEN cat = 'brick' THEN 7
-									END rnk FROM DimGeo) g 
+								FROM DimGeo g 
 								INNER JOIN cte c ON g.region = c.id
 							)
 							SELECT c.id INTO #wheregeotemp 
@@ -356,7 +342,7 @@ BEGIN
 				SET @indColInSelect = '[pop]'
 				SET @interimSelect = '''pop'''
 			END
-
+			
 			;WITH cte (id, name, par, parId, cat, region, rnk)AS
 			(
 				SELECT CAST(id AS NVARCHAR(255)) id, 
@@ -365,15 +351,8 @@ BEGIN
 				geo.name parId, 
 				CAST(cat AS NVARCHAR(255))cat,
 				geo.region,
-				geo.rnk rnk
-				FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
-									WHEN cat = 'region' THEN 2
-									WHEN cat = 'country' THEN 3  
-									WHEN cat = 'province' THEN 4
-									WHEN cat = 'territory' THEN 5
-									WHEN cat = 'sub territory' THEN 6 
-									WHEN cat = 'brick' THEN 7
-									END rnk FROM DimGeo) geo 
+				geo.lev rnk
+				FROM  DimGeo geo 
 				INNER JOIN #wheregeo wg ON geo.id = wg.name
 
 				UNION ALL
@@ -385,16 +364,11 @@ BEGIN
 				c.cat, 
 				c.region,
 				c.rnk+1
-				FROM (SELECT *,CASE WHEN cat ='planet' THEN 1 
-									WHEN cat = 'region' THEN 2
-									WHEN cat = 'country' THEN 3  
-									WHEN cat = 'province' THEN 4
-									WHEN cat = 'territory' THEN 5
-									WHEN cat = 'sub territory' THEN 6 
-									WHEN cat = 'brick' THEN 7
-									END rnk FROM DimGeo) g INNER JOIN cte c
+				FROM DimGeo g INNER JOIN cte c
 				ON g.region = c.id
+				AND C.rnk + 1 <= @reportData
 			)
+			
 			SELECT dc.ID, c.par [Country Code], c.parId [Short Name], c.region, c.cat [category]
 			INTO #geoFinal 
 			FROM dimCountry dc 
@@ -604,7 +578,7 @@ END
 
 
 GO
-
+/*
 execute StatsQuery
 '
 <root>
@@ -621,7 +595,7 @@ execute StatsQuery
     <WHERE>
       <geo>*</geo>
       <geo.cat>country</geo.cat>
-      <time>1900-2015</time>
+      <time>1800-2020</time>
       <quantity />
     </WHERE>
     <FROM>spreedsheet</FROM>
@@ -629,4 +603,4 @@ execute StatsQuery
   <lang>en</lang>
 </root>
 '
-
+*/

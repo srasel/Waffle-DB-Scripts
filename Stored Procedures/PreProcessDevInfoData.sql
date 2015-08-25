@@ -125,7 +125,7 @@ BEGIN
 		FROM dbo.AllDevInfoRawData 
 		GROUP BY Indicator
 
-		DROP INDEX ix_fact ON FactFinal
+		--DROP INDEX ix_fact ON FactFinal
 
 		DELETE FROM FactFinal
 		WHERE DataSourceID = 6
@@ -151,9 +151,9 @@ BEGIN
 		AND c.id IS NOT NULL
 		AND S.ID IS NOT NULL
 
-		CREATE NONCLUSTERED INDEX ix_fact 
-		ON factfinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
-		INCLUDE([Value])
+		--CREATE NONCLUSTERED INDEX ix_fact 
+		--ON factfinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
+		--INCLUDE([Value])
 
 END
 

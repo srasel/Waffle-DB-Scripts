@@ -69,7 +69,7 @@ BEGIN
 		FROM [dbo].[OPHI_Raw_Data]
 		GROUP BY Indicator
 
-		DROP INDEX ix_fact ON FactFinal
+		--DROP INDEX ix_fact ON FactFinal
 
 		DELETE FROM FactFinal
 		WHERE DataSourceID = 9
@@ -107,9 +107,9 @@ BEGIN
 		) i
 			ON r.Indicator = i.[Indicator Name]
 
-		CREATE NONCLUSTERED INDEX ix_fact 
-		ON FactFinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
-		INCLUDE([Value])
+		--CREATE NONCLUSTERED INDEX ix_fact 
+		--ON FactFinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
+		--INCLUDE([Value])
 
 
 END

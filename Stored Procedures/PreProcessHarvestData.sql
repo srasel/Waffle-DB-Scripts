@@ -110,7 +110,7 @@ BEGIN
 		FROM [dbo].[HarvestChoiceRawData]
 		GROUP BY Indicator
 		
-		DROP INDEX ix_fact ON FactFinal
+		--DROP INDEX ix_fact ON FactFinal
 
 		DELETE FROM FactFinal
 		WHERE DataSourceID = 7
@@ -163,9 +163,9 @@ BEGIN
 		) i
 			ON r.Indicator = i.[Indicator Name]
 
-		CREATE NONCLUSTERED INDEX ix_fact 
-		ON factfinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
-		INCLUDE([Value])
+		--CREATE NONCLUSTERED INDEX ix_fact 
+		--ON factfinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
+		--INCLUDE([Value])
 
 END
 

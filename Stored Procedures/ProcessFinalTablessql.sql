@@ -91,7 +91,7 @@ BEGIN
 		UPDATE [dbo].[DimIndicators]
 		SET [Indicator Code] = LEFT(LOWER(REPLACE([Indicator Name],' ', '_')),99)
 
-		DROP INDEX ix_fact ON FactFinal
+		--DROP INDEX ix_fact ON FactFinal
 
 		TRUNCATE TABLE FactFinal
 		INSERT INTO factfinal 
@@ -171,9 +171,9 @@ BEGIN
 		ON r.geo = dc.[country code]
 		WHERE dc.ID IS NOT NULL 
 
-		CREATE NONCLUSTERED INDEX ix_fact 
-		ON factfinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
-		INCLUDE([Value])
+		--CREATE NONCLUSTERED INDEX ix_fact 
+		--ON factfinal ([datasourceid], [country code], [period], [indicator code],[SubGroup] ) 
+		--INCLUDE([Value])
 		
 		
 		/*
