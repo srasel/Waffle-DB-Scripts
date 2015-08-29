@@ -88,7 +88,7 @@ BEGIN
 		USING (
 			SELECT * FROM #final
 		) S
-		ON (T.id = S.id AND T.cat = S.cat)
+		ON (T.id = S.id AND T.cat = S.cat AND S.region = T.region)
 		WHEN NOT MATCHED BY TARGET THEN 
 			INSERT(dim,id,name,region,cat,lev) 
 			VALUES(S.dim,S.id,S.name,S.region,S.cat,S.lev);

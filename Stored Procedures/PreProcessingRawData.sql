@@ -40,6 +40,11 @@ AS
 		EXECUTE [dbo].[PreProcessHarvestData]
 		EXECUTE [dbo].[PreProcessNBERData]
 		EXECUTE [dbo].[PreProcessOPHIData]
+		EXECUTE [dbo].[PreProcessSEDACData]
+		EXECUTE [dbo].[ProcessAdhocData]
+		EXECUTE [dbo].[PreProcessMortalityData] 
+
+		EXECUTE [dbo].[IndexAndConstraint] 'CREATE'
 
 		UPDATE i
 		SET i.[Indicator Code] = r.IndicatorNameAfter
@@ -47,9 +52,27 @@ AS
 		ON i.DataSourceID = r.DataSourceID
 		AND i.[Indicator Name] = r.IndicatorNameBefore
 
-		EXECUTE [dbo].[ProcessAdhocData]
+		/*
+			
+			update i 
+			set i.[Indicator Name] = case [Indicator Name]
+				when 'cMx_1x1' then 'Death rates (cohort 1x1)'
+				when 'cExposures_1x1' then 'Exposure to risk (cohort 1x1)'
+				when 'Deaths_1x1' then  'Deaths (1x1)'
+				when 'Mx_1x1' then 'Death rates (period 1x1)' 
+				else [Indicator Name]
+				end
+					 
+			from dimindicators i
+			where datasourceid  = 12
 
-		EXECUTE [dbo].[IndexAndConstraint] 'CREATE'
+		*/
+
+		UPDATE A
+		SET A.Lev = H.GeoLevelNo
+		FROM UtilityAvailableDataLevel A INNER JOIN GeoHierarchyLevel H
+		ON A.Category = H.GeoLevelName
+
 
   END 
 GO

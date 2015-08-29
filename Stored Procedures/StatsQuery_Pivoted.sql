@@ -1,15 +1,16 @@
-IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[StatsQuery]') AND type in (N'P', N'PC'))
-DROP PROCEDURE [dbo].[StatsQuery]
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[StatsQuery_Pivoted]') AND type in (N'P', N'PC'))
+DROP PROCEDURE [dbo].[StatsQuery_Pivoted]
 GO
 
-/****** Object:  StoredProcedure [dbo].[StatsQuery]    Script Date: 7/7/2015 4:47:31 AM ******/
+/****** Object:  StoredProcedure [dbo].[StatsQuery_Pivoted]    Script Date: 8/29/2015 6:08:13 AM ******/
 SET ANSI_NULLS ON
 GO
 
 SET QUOTED_IDENTIFIER ON
 GO
 
-CREATE PROCEDURE [dbo].[StatsQuery]
+
+CREATE PROCEDURE [dbo].[StatsQuery_Pivoted]
 @XML XML
 AS
 BEGIN
@@ -39,11 +40,13 @@ BEGIN
 
 		CREATE TABLE #FROM (tab VARCHAR(100))
 		CREATE TABLE #time (period INT)
-		
+		/*
+			history of data level available for each source
+		*/
 		SET @XmlStr = @XML
 		SET @newId = NEWID()
 
-		SET @factTable = 'FactFinal'
+		SET @factTable = 'FactFinalHMD_Pivoted'
 
 		BEGIN TRY
 		
@@ -98,6 +101,19 @@ BEGIN
 				RETURN
 			END
 
+			-- extract FROM
+			INSERT INTO #FROM
+			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
+			FROM @XmlStr.nodes('//root//query//FROM') x(col)
+
+			SELECT @dataSourceID = S.ID 
+			FROM DimDataSource S INNER JOIN #FROM F
+			ON S.DataSource = F.tab
+
+			UPDATE #FROM
+			SET tab = 'spreedsheet'
+			WHERE tab = 'humnum'
+
 			-- remove duplicate from SELECT list.
 			;WITH cte AS (
 				SELECT *, 
@@ -115,18 +131,7 @@ BEGIN
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
 			FROM @XmlStr.nodes('//root//query//WHERE//geo') x(col)
 
-			-- extract FROM
-			INSERT INTO #FROM
-			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
-			FROM @XmlStr.nodes('//root//query//FROM') x(col)
-
-			SELECT @dataSourceID = S.ID 
-			FROM DimDataSource S INNER JOIN #FROM F
-			ON S.DataSource = F.tab
-
-			UPDATE #FROM
-			SET tab = 'spreedsheet'
-			WHERE tab = 'humnum'
+			
 
 			--- extract others --
 			INSERT INTO #whereage(AGE)
@@ -248,9 +253,11 @@ BEGIN
 			BEGIN
 				SET @reportData = @reportData
 			END
+			--select @reportData
 			/*
 				If no geo selected or geo='*' in WHERE clause
 			*/
+
 			IF(@@ROWCOUNT = 0 or (SELECT top 1 name FROM #wheregeo)='*')
 				BEGIN
 					
@@ -415,7 +422,13 @@ BEGIN
 			FROM #whereind s
 			FOR XML PATH ('')),1,1,'')
 
-			--SELECT @indColInSelect
+			DECLARE @indColInSelectPivoted NVARCHAR(MAX)
+			SELECT @indColInSelectPivoted = STUFF((
+			SELECT (',' + ' CASE WHEN ''' + s.name + ''' = ''pop'' THEN round(sum(f.[' + s.name + ']),0) ELSE dbo.fix(sum(f.[' + s.name + ']),4) END  [' + s.name + ']') AS [text()]
+			FROM #whereind s
+			FOR XML PATH ('')),1,1,'')
+
+			--SELECT @indColInSelectPivoted
 	
 			DECLARE @interimSelect VARCHAR(100)
 			SET @interimSelect = '[Indicator Code]'
@@ -531,19 +544,25 @@ BEGIN
 							AND A.[Period] = B.[Period]
 						)C
 					'
+				--PRINT @dyn_sql
 				EXECUTE SP_EXECUTESQL @dyn_sql, @parmDefinition, @start = @start, @END = @END
 				--exec('SELECT * FROM [FactFinal' + @newId + ']')
-				SET @factTable = @factTable + @newId
+				SET @factTable = 'FactFinal' + @newId
 			END
 
+			DECLARE @otherJoin VARCHAR(MAX)
+			SET @otherJoin = ''
+
+			--IF(SELECT COUNT(*) FROM #SELECT WHERE name = )
+			--BEGIN
+			--END
+
 			SET @dyn_sql = N'
-					SELECT ' + @colInQuerySelection + ', sum(f.Value) val,  di.[Indicator Code]
+					SELECT ' + @colInQuerySelection + ', ' + @indColInSelectPivoted + '
 					INTO [SumTable' + @newId + ']
-					FROM (SELECT [DataSourceID],[country code], [period], [indicator code],[SubGroup],[Age],[Gender],[Value]  FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + ' ) f 
+					FROM (SELECT *  FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + ' ) f 
 					LEFT JOIN (SELECT * FROM #geoFinal) dc
 					ON f.[Country Code] = dc.ID
-					LEFT JOIN ( SELECT i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] FROM DimIndicators i LEFT JOIN #whereind w ON i.[Indicator Code] = w.name WHERE w.name IS NOT NULL) di
-					ON f.[Indicator Code] = di.ID
 					LEFT JOIN #whereage ag
 					ON f.age = ag.ID
 					LEFT JOIN #wheregender gen
@@ -554,19 +573,22 @@ BEGIN
 					--ON t.period = f.Period
 					WHERE dc.ID IS NOT NULL
 					AND f.DataSourceID = (SELECT top 1 ID FROM DimDataSource INNER JOIN #FROM ON DataSource = tab)
-					AND di.ID IS NOT NULL
 					AND f.Period = t.period--(Period >=t.minTime AND Period <= t.maxTime)
 					--AND f.Period between @start AND @END
 					AND ag.ID IS NOT NULL
 					AND gen.ID IS NOT NULL
 					AND sg.ID IS NOT NULL
-					group by ' + @colInGroupBy + ', di.[Indicator Code]
+					group by ' + @colInGroupBy + '
 				'
 			--PRINT @dyn_sql
+
+			---return
 			EXECUTE SP_EXECUTESQL @dyn_sql, @parmDefinition, @start = @start, @END = @END
 
+			--select @colInFinalSelect
+			--return
+
 			--exec('SELECT * FROM [SumTable' + @newId + ']')
-		
 			
 			IF(CHARINDEX('time',@colInQuerySelection,1)>0)
 			BEGIN
@@ -575,59 +597,107 @@ BEGIN
 				WHERE TABLE_NAME = 'SumTable' + @newId
 				AND COLUMN_NAME NOT in ('time','val')
 				FOR XML PATH('')),1,1,'')
-			
+
+				DECLARE @colsM NVARCHAR(MAX)
+				SELECT @colsM =  stuff((SELECT ',['+ COLUMN_NAME + ']'  
+				FROM INFORMATION_SCHEMA.COLUMNS C 
+					LEFT JOIN #whereind I
+				ON C.COLUMN_NAME = I.name
+				WHERE C.TABLE_NAME = 'SumTable' + @newId
+				AND C.COLUMN_NAME NOT in ('time')
+				AND I.name IS NULL
+				FOR XML PATH('')),1,1,'')
+
+				DECLARE @colsI NVARCHAR(MAX)
+				SELECT @colsI =  stuff((SELECT ',['+ I.name + ']'  
+				FROM #whereind I
+				FOR XML PATH('')),1,1,'')
+
+				DECLARE @colsINULL NVARCHAR(MAX)
+				SELECT @colsINULL =  stuff((SELECT ',NULL ['+ I.name + ']'  
+				FROM #whereind I
+				FOR XML PATH('')),1,1,'')
+
+				DECLARE @colsISUM NVARCHAR(MAX)
+				SELECT @colsISUM =  stuff((SELECT ',SUM(['+ I.name + ']) ['+ I.name + ']'  
+				FROM #whereind I
+				FOR XML PATH('')),1,1,'')
+
 				SET @dyn_sql = N'
-					INSERT INTO [SumTable' + @newId + '](' +  @cols + ', time, val)
-					SELECT ' + @cols + ',period, NULL val
+					INSERT INTO [SumTable' + @newId + ']
+					(' + @colsM + ',time,' + @colsI +' )
+					SELECT ' + @colsM + ',period time, ' + @colsINULL + ' 
 					FROM [SumTable' + @newId + '], #time
-					group by ' + @cols + ', period
+					group by ' + @colsM + ', period
 				'
 				EXECUTE SP_EXECUTESQL @dyn_sql
-				--SELECT * FROM SumTable
 
 				IF OBJECT_ID('WithAllData', 'U') IS NOT NULL
 					DROP TABLE dbo.WithAllData 
 
 				SET @dyn_sql = N'
-					SELECT ' + @cols + ',time,sum(val) val
+					SELECT ' + @colsM + ',time, ' + @colsISUM + ' 
 					INTO [WithAllData' + @newId + '] 
 					FROM [SumTable' + @newId + '] 
-					group by ' + @cols + ', time
+					group by ' + @colsM + ', time
 				'
+				--PRINT @DYN_SQL
 				EXECUTE SP_EXECUTESQL @dyn_sql
 				--SELECT * FROM WithAllData
-			
+				--exec('SELECT * FROM [WithAllData' + @newId + ']')
+				
+				DECLARE @countC NVARCHAR(MAX)
+				SELECT @countC =  stuff((
+				SELECT ',COUNT(['+I.name + ']) OVER (partition by ' + @colsM + ' ORDER BY time) ['+ I.name +'C]'  
+				FROM #whereind I
+				FOR XML PATH('')),1,1,'')
+
+				DECLARE @X NVARCHAR(MAX)
+				SELECT @X =  stuff((
+				SELECT ',1+COUNT(CASE WHEN ['+ I.name +'] IS NULL THEN 1 END) OVER (PARTITION BY ' + @colsM +',['+ I.name + 'C]) ['+ I.name + 'X]'  
+				FROM #whereind I
+				FOR XML PATH('')),1,1,'')
+
+				DECLARE @M NVARCHAR(MAX)
+				SELECT @M =  stuff((
+				SELECT ',(ROW_NUMBER() OVER (PARTITION BY ' + @colsM +',['+ I.name +'C] ORDER BY [time]) - 1)['+ I.name +'M]'  
+				FROM #whereind I
+				FOR XML PATH('')),1,1,'')
+
+				DECLARE @N NVARCHAR(MAX)
+				SELECT @N =  stuff((
+				SELECT ',(ROW_NUMBER() OVER (PARTITION BY ' + @colsM +',['+ I.name +'C] ORDER BY [time] DESC))['+ I.name +'N]'  
+				FROM #whereind I
+				FOR XML PATH('')),1,1,'')
+
+				DECLARE @S NVARCHAR(MAX)
+				SELECT @S =  stuff((
+				SELECT ',MAX(['+ I.name +']) OVER (PARTITION BY ' + @colsM +',['+ I.name + 'C])['+I.name +'S]'  
+				FROM #whereind I
+				FOR XML PATH('')),1,1,'')
+
+				DECLARE @val NVARCHAR(MAX)
+				SELECT @val =  stuff((
+				SELECT ',CASE WHEN ['+ I.name +'] IS NOT NULL THEN ['+ I.name +'] ELSE ['+ I.name +'S] + (1. * ['+ I.name+'M] / ['+ I.name +'X]) * (LEAD(['+I.name+'], ['+ I.name +'N], ['+ I.name +'S]) OVER (partition by ' + @colsM + ' ORDER BY [time]) - ['+ I.name +'S]) END [' + I.name + ']'  
+				FROM #whereind I
+				FOR XML PATH('')),1,1,'')
 			
 				SET @dyn_sql = N'
-					SELECT ' + @colInFinalSelect + ','  + @indColInSelect + ' 
-					FROM (
-						SELECT ' + @colInFinalSelect + ', val, ' + @interimSelect + ' [Indicator Code]
-						FROM (
-								SELECT ' + @cols + ',[time]
-								,val=CASE
-									WHEN val IS NOT NULL THEN val
-									ELSE s + (1. * m / x) * (LEAD(val, n, s) OVER (partition by ' + @cols + ' ORDER BY [time]) -s)
-									END
-								FROM
-								(
-									SELECT ' + @cols + ',[time], val, s=MAX(val) OVER (PARTITION BY ' + @cols +',c)
-										,n=ROW_NUMBER() OVER (PARTITION BY ' + @cols +',c ORDER BY [time] DESC)
-										,m=ROW_NUMBER() OVER (PARTITION BY ' + @cols +',c ORDER BY [time]) - 1
-										,x=1 + COUNT(CASE WHEN val IS NULL THEN 1 END) OVER (PARTITION BY ' + @cols +',c)
-									FROM
-									(
-										SELECT ' + @cols + ',[time], val
-											,c=COUNT(val) OVER (partition by ' + @cols + ' ORDER BY time)
-										FROM [WithAllData' + @newId + '] 
-									) a
-								) a
-						) b --WHERE val > 0
-					)A 
-					pivot
+					SELECT ' + @colsM + ',[time]
+					,' + @val + '
+					FROM
 					(
-						sum(val)
-						FOR [Indicator Code] in (' + @indCol + ')
-					) AS pvt
+						SELECT ' + @colsM + ',' + @colsI + ',[time], ' + @S + '
+							,'+ @N +'
+							,'+ @M +'
+							,'+ @X +'
+						FROM
+						(
+							SELECT ' + @colsM + ',' + @colsI + ',[time]
+								,' + @countC + ' 
+							FROM [WithAllData' + @newId + '] 
+						) a
+					) a
 				'
 				--print @dyn_sql
 				EXECUTE SP_EXECUTESQL @dyn_sql
@@ -650,10 +720,16 @@ BEGIN
 						FOR [Indicator Code] in (' + @indCol + ')
 					) AS pvt
 				'
-				EXECUTE SP_EXECUTESQL @dyn_sql
+				--print @dyn_sql
+				--EXECUTE SP_EXECUTESQL @dyn_sql
 			
 			
 			END
+
+			--select @colInFinalSelect
+			--select @indColInSelect
+			--select @interimSelect
+			--select @indCol
 
 			SET @dropT = 'drop TABLE [' + ('SumTable' + @newId) + ']'
 			IF OBJECT_ID('SumTable' + @newId + '', 'U') IS NOT NULL
@@ -677,28 +753,7 @@ BEGIN
 END
 
 
+
 GO
 
-execute StatsQuery
-'
-<root>
-  <query>
-    <SELECT>geo</SELECT>
-    <SELECT>time</SELECT>
-    <SELECT>geo.name</SELECT>
-    <SELECT>geo.region</SELECT>
-    <SELECT>pop</SELECT>
-    <WHERE>
-      <geo>*</geo>
-      <geo.cat>country</geo.cat>
-      <time>1990</time>
-      <quantity />
-      <age>20-26</age>
-      <gender>male</gender>
-      <group>N/A</group>
-    </WHERE>
-    <FROM>hmd</FROM>
-  </query>
-  <lang>en</lang>
-</root>
-'
+

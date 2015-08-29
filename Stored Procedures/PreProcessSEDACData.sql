@@ -19,37 +19,53 @@ AS
 BEGIN
 		SET NOCOUNT ON;
 
-		--DROP TABLE #A
+		--DROP TABLE #IMR
 		SELECT CountryCode, Region, RegionCode
 			, CAST(RegionCode as VARCHAR(200)) id
-			INTO #A
+			INTO #IMR
 		FROM [dbo].[SEDAC_IMR]
 		GROUP BY CountryCode, Region, RegionCode
-
+		
 		UPDATE G
-		SET G.id = A.id
-		--SELECT * 
-		FROM DimGeo G LEFT JOIN #A A
+		SET G.id =	LOWER(A.id)
+		--SELECT *, ROW_NUMBER() OVER PARTITION BY A.
+		FROM DimGeo G INNER JOIN #IMR A
 		ON A.CountryCode = G.region
 		AND A.Region = G.name
-		WHERE A.id IS NOT NULL
+
+		;WITH CTE
+		AS
+		(
+			SELECT *, ROW_NUMBER() OVER (PARTITION BY id ORDER BY id) RNK
+			FROM DimGeo
+		)
+		DELETE FROM CTE WHERE RNK > 1
 
 		MERGE DimGeo T
 		USING (
 			SELECT A.id,A.Region name,CountryCode region, 'province' cat,G.[GeoLevelNo] lev
-			FROM #A A, [dbo].[GeoHierarchyLevel] G
+			FROM #IMR A, [dbo].[GeoHierarchyLevel] G
 			WHERE G.[GeoLevelName] = 'province'
+			AND LEN(A.ID)>3
 
 		) S
-		ON (T.id = S.id AND T.cat = 'province')
+		ON (T.id = S.id AND T.cat = 'province' AND T.region = S.region)
 		WHEN NOT MATCHED BY TARGET THEN 
 			INSERT(dim,id,name,region,cat,lev) 
 			VALUES('geo',S.id,S.name,S.region,S.cat,S.lev);
+
+		;WITH CTE
+		AS
+		(
+			SELECT *, ROW_NUMBER() OVER (PARTITION BY id ORDER BY id) RNK
+			FROM DimGeo
+		)
+		DELETE FROM CTE WHERE RNK > 1
 		
 		MERGE dbo.DimCountry T
 		USING (
 			SELECT A.id,A.Region name,CountryCode region, 'province' cat,G.[GeoLevelNo] lev
-			FROM #A A, [dbo].[GeoHierarchyLevel] G
+			FROM #IMR A, [dbo].[GeoHierarchyLevel] G
 			WHERE G.[GeoLevelName] = 'province'
 		) S
 		ON (T.[Country Code] = S.id)
@@ -59,11 +75,15 @@ BEGIN
 
 		DELETE FROM [dbo].[DimIndicators]
 		WHERE DataSourceID = 11
-
 		
 		INSERT INTO DimIndicators([DataSourceID],[Indicator Code], [Indicator Name])
 		SELECT 11,LEFT(LOWER(REPLACE(indicator,' ', '_')),99), indicator 
 		FROM [dbo].[SEDAC_IMR]
+		GROUP BY Indicator
+			UNION
+		SELECT 11,LEFT(LOWER(REPLACE(indicator,' ', '_')),99), indicator 
+		FROM [dbo].[SEDAC_National_Poverty_RawData]
+		WHERE Indicator<>''
 		GROUP BY Indicator
 
 		--DROP INDEX ix_fact ON FactFinal
@@ -90,7 +110,7 @@ BEGIN
 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator  
 			FROM [dbo].[SEDAC_IMR] hr
-			LEFT JOIN #A f
+			LEFT JOIN #IMR f
 			ON hr.RegionCode = F.RegionCode
 			AND hr.CountryCode = f.CountryCode
 			LEFT JOIN DimCountry dc
@@ -104,38 +124,106 @@ BEGIN
 		) i
 			ON r.Indicator = i.[Indicator Name]
 
-		SELECT TOP 2 * FROM [dbo].[SEDAC_National_Poverty_RawData]
-
-		INSERT INTO DimIndicators([DataSourceID],[Indicator Code], [Indicator Name])
-		SELECT 11,LEFT(LOWER(REPLACE(indicator,' ', '_')),99), indicator 
-		FROM [dbo].[SEDAC_IMR]
-		GROUP BY Indicator
-
-		/* need to modify the following code block */
-		SELECT CountryName,AdmLevel FROM [dbo].[SEDAC_National_Poverty_RawData]
-		GROUP BY CountryName ,AdmLevel
-		ORDER BY CountryName ,AdmLevel
-
-		SELECT * FROM [dbo].[SEDAC_National_Poverty_RawData]
-		WHERE CountryName = 'Bolivia'
-		ORDER BY AdmLevel
-
-		SELECT * FROM [dbo].[SEDAC_National_Poverty_RawData]
-		WHERE AdmUnitId = 5240000
-		--SELECT *
-		--FROM (
-		
-		--)A LEFT JOIN DimGeo G
-		--ON A.CountryCode = G.region
-		--AND A.Region = G.name
-		--WHERE G.id IS NULL
-
 		--SELECT TOP 2 * FROM [dbo].[SEDAC_National_Poverty_RawData]
+		--DROP TABLE #POV
+		SELECT CountryCode,CountryName,Region, 'province' cat
+		,CAST(NULL AS VARCHAR(100)) id
+		INTO #POV
+		FROM (
+			SELECT CountryCode,CountryName,Region, AdmLevel, DENSE_RANK() OVER(PARTITION BY CountryCode,CountryName ORDER BY AdmLevel) rnk 
+			FROM [dbo].[SEDAC_National_Poverty_RawData]
+			WHERE ISNUMERIC(Region) = 0
+			GROUP BY CountryCode,CountryName, Region, AdmLevel
+
+		)A WHERE rnk = 1
+		ORDER BY CountryName
+
+		UPDATE B
+		SET B.ID = IIF(G.id IS NULL, LOWER(B.CountryCode+'-'+REPLACE(B.Region,' ','-')) ,G.id)
+		FROM #POV B LEFT JOIN (SELECT * FROM DimGeo WHERE cat = 'province') G
+		ON B.Region = G.name
+		AND B.CountryCode = G.region
+
+		MERGE DimGeo T
+		USING (
+			SELECT A.id,A.Region name,LOWER(CountryCode) region, 'province' cat,G.[GeoLevelNo] lev
+			FROM #POV A, [dbo].[GeoHierarchyLevel] G
+			WHERE G.[GeoLevelName] = 'province'
+
+		) S
+		ON (T.id = S.id AND T.cat = 'province' AND T.region = S.region)
+		WHEN NOT MATCHED BY TARGET THEN 
+			INSERT(dim,id,name,region,cat,lev) 
+			VALUES('geo',S.id,S.name,S.region,S.cat,S.lev);
+
+		;WITH CTE
+		AS
+		(
+			SELECT *, ROW_NUMBER() OVER (PARTITION BY id ORDER BY id) RNK
+			FROM DimGeo
+		)
+		DELETE FROM CTE WHERE RNK > 1
+		
+		MERGE dbo.DimCountry T
+		USING (
+			SELECT A.id,A.Region name,CountryCode region, 'province' cat,G.[GeoLevelNo] lev
+			FROM #POV A, [dbo].[GeoHierarchyLevel] G
+			WHERE G.[GeoLevelName] = 'province'
+		) S
+		ON (T.[Country Code] = S.id)
+		WHEN NOT MATCHED BY TARGET THEN 
+			INSERT([type],[Country Code],[Short Name],[Country Name]) 
+			VALUES(S.cat,LOWER(S.id),S.name,S.name);
+
+		;WITH CTE
+		AS
+		(
+			SELECT *, ROW_NUMBER() OVER (PARTITION BY [Country Code] ORDER BY [Country Code]) RNK
+			FROM DimCountry
+		)
+		DELETE FROM CTE WHERE RNK > 1
+
+		DELETE FROM FactFinal
+		WHERE DataSourceID = 11
+
+		INSERT INTO FactFinal 
+					([datasourceid], 
+					[country code], 
+					period, 
+					[indicator code], 
+					[value]) 
+		SELECT 11, r.ID, LEFT(r.Period,4), i.ID, TRY_CONVERT(float,r.DataValue)
+		FROM ( 
+			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator
+			FROM [dbo].[SEDAC_National_Poverty_RawData] hr
+			LEFT JOIN DimCountry dc
+			ON hr.CountryCode = dc.[Country Code]
+			WHERE dc.[Country Code] IS NOT NULL
+			AND dc.Type = 'country'
+
+			UNION ALL
+
+			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator  
+			FROM [dbo].[SEDAC_National_Poverty_RawData] hr
+			LEFT JOIN #POV f
+			ON hr.Region = F.Region
+			AND hr.CountryCode = f.CountryCode
+			LEFT JOIN DimCountry dc
+			ON f.id = dc.[Country Code]
+			WHERE dc.[Country Code] IS NOT NULL
+			AND dc.Type = 'province'
+			AND F.id IS NOT NULL
+		)r 
+		LEFT JOIN (
+			SELECT * FROM DimIndicators WHERE DataSourceID = 11
+		) i
+			ON r.Indicator = i.[Indicator Name]
+
 
 END
 
 GO
 
-EXECUTE [dbo].[PreProcessSEDACData]
+--EXECUTE [dbo].[PreProcessSEDACData]
 
 

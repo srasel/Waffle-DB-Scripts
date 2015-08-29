@@ -28,12 +28,12 @@ BEGIN
 		)
 		DELETE FROM CTE WHERE RNK > 1
 		
-		TRUNCATE TABLE dbo.DimCountry
+		--TRUNCATE TABLE dbo.DimCountry
 
-		INSERT INTO dbo.DimCountry([Type],[Country Code],[Short Name], [Country Name])
-		SELECT cat,id,name,name
-		FROM DimGeo
-		ORDER BY lev
+		--INSERT INTO dbo.DimCountry([Type],[Country Code],[Short Name], [Country Name])
+		--SELECT cat,id,name,name
+		--FROM DimGeo
+		--ORDER BY lev
 
 		--INSERT INTO dbo.DimCountry([Type],[Country Code],[Short Name], [Country Name])
 		--	SELECT 'geo', [Country Code],[Short Name], [Long Name] 

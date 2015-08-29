@@ -113,6 +113,8 @@ BEGIN
 
 		TRUNCATE TABLE DBO.DimSubGroup
 		INSERT INTO DimSubGroup (SubGroup)
+		SELECT 'N/A'
+		UNION ALL
 		SELECT SUBGROUP
 		FROM AllDevInfoRawData
 		GROUP BY Subgroup
