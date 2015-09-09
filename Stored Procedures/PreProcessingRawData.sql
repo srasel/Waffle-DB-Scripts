@@ -14,7 +14,7 @@ GO
 -- Create date: <Create Date,,>
 -- Description:	<Description,,>
 -- =============================================
-CREATE PROCEDURE [dbo].[Preprocessrawdata] 
+CREATE PROCEDURE [dbo].[PreProcessRawData] 
 AS 
   BEGIN 
       
@@ -42,7 +42,7 @@ AS
 		EXECUTE [dbo].[PreProcessOPHIData]
 		EXECUTE [dbo].[PreProcessSEDACData]
 		EXECUTE [dbo].[ProcessAdhocData]
-		EXECUTE [dbo].[PreProcessMortalityData] 
+		--EXECUTE [dbo].[PreProcessMortalityData] 
 
 		EXECUTE [dbo].[IndexAndConstraint] 'CREATE'
 

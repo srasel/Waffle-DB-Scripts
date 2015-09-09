@@ -98,6 +98,43 @@ BEGIN
 				RETURN
 			END
 
+			-- extract FROM
+			INSERT INTO #FROM
+			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
+			FROM @XmlStr.nodes('//root//query//FROM') x(col)
+
+			SELECT @dataSourceID = S.ID, @factTable = S.FactTableName
+			FROM DimDataSource S INNER JOIN #FROM F
+			ON S.DataSource = F.tab
+
+			-- extract the indicator list from SELECT clause
+			INSERT INTO #whereind
+			SELECT s.name
+			FROM #SELECT s LEFT JOIN vDimDetails d
+			ON s.name = d.[-t-id]
+			WHERE d.[-t-id] IS NULL
+
+			IF(
+				SELECT COUNT(*)
+				FROM #whereind I LEFT JOIN UtilityCommonlyUsedIndicators C
+				ON I.name = C.IndicatorCode
+				WHERE C.ID IS NULL
+			) = 0
+			BEGIN
+				EXECUTE StatsQuery_Pivoted @XML
+
+				UPDATE LogRequest
+				SET [Status] = 1
+				,EndTime = getdate()
+				WHERE QueryUniqueID = @newId
+
+				RETURN
+			END
+
+			UPDATE #FROM
+			SET tab = 'spreedsheet'
+			WHERE tab = 'humnum'
+
 			-- remove duplicate from SELECT list.
 			;WITH cte AS (
 				SELECT *, 
@@ -115,26 +152,17 @@ BEGIN
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
 			FROM @XmlStr.nodes('//root//query//WHERE//geo') x(col)
 
-			-- extract FROM
-			INSERT INTO #FROM
-			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
-			FROM @XmlStr.nodes('//root//query//FROM') x(col)
-
-			SELECT @dataSourceID = S.ID 
-			FROM DimDataSource S INNER JOIN #FROM F
-			ON S.DataSource = F.tab
-
-			UPDATE #FROM
-			SET tab = 'spreedsheet'
-			WHERE tab = 'humnum'
-
 			--- extract others --
 			INSERT INTO #whereage(AGE)
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
 			FROM @XmlStr.nodes('//root//query//WHERE//age') x(col)
 			
 			DECLARE @age VARCHAR(10) = 'N/A'
-			IF(@@ROWCOUNT=0 OR (SELECT TOP 1 age FROM #whereage)='' OR (SELECT TOP 1 age FROM #whereage)='*')
+			IF(
+				@@ROWCOUNT=0 
+				OR (SELECT TOP 1 age FROM #whereage)='' 
+				OR (SELECT TOP 1 age FROM #whereage)='*'
+			)
 			BEGIN
 				
 				IF(@dataSourceID = 12)
@@ -145,7 +173,6 @@ BEGIN
 				INSERT INTO #whereage (age)
 				SELECT @age
 			END
-
 			
 			IF (@dataSourceID = 12 AND (SELECT TOP 1 age FROM #whereage) <> 'N/A')
 			BEGIN
@@ -344,12 +371,7 @@ BEGIN
 				SET @counter = @counter + 1;
 			END
 			
-			-- extract the indicator list from SELECT clause
-			INSERT INTO #whereind
-			SELECT s.name
-			FROM #SELECT s LEFT JOIN vDimDetails d
-			ON s.name = d.[-t-id]
-			WHERE d.[-t-id] IS NULL
+			
 
 			/*
 				another hard-coded logic to handle
@@ -536,6 +558,13 @@ BEGIN
 				SET @factTable = @factTable + @newId
 			END
 
+			--select * from #geoFinal
+			--select * from #whereage
+			--select * from #wherecat
+			--select * from #whereind
+			--select * from #wheregender
+			--select * from #wheresubgroup
+
 			SET @dyn_sql = N'
 					SELECT ' + @colInQuerySelection + ', sum(f.Value) val,  di.[Indicator Code]
 					INTO [SumTable' + @newId + ']
@@ -685,19 +714,15 @@ execute StatsQuery
   <query>
     <SELECT>geo</SELECT>
     <SELECT>time</SELECT>
-    <SELECT>geo.name</SELECT>
-    <SELECT>geo.region</SELECT>
-    <SELECT>pop</SELECT>
+    <SELECT>co2_per_capita</SELECT>
     <WHERE>
       <geo>*</geo>
       <geo.cat>country</geo.cat>
-      <time>1990</time>
+      <time>1852-1996</time>
       <quantity />
-      <age>20-26</age>
-      <gender>male</gender>
-      <group>N/A</group>
+	  <age />
     </WHERE>
-    <FROM>hmd</FROM>
+    <FROM>spreedsheet</FROM>
   </query>
   <lang>en</lang>
 </root>

@@ -11,7 +11,7 @@ GO
 
 
 CREATE PROCEDURE [dbo].[StatsQuery_Pivoted]
-@XML XML
+	@XML XML
 AS
 BEGIN
 		SET NOCOUNT ON;
@@ -50,9 +50,6 @@ BEGIN
 
 		BEGIN TRY
 		
-			INSERT INTO LogRequest([QueryUniqueID],[InputXML])
-			SELECT @newId, @XML
-
 			-- extract the values under SELECT
 			INSERT INTO #SELECT
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
@@ -68,45 +65,13 @@ BEGIN
 			ON s.name = d.[-t-id]
 			WHERE d.[-t-id] IS NULL
 
-			/*
-				if SELECT does not contain any measure column
-				so, asking for Geo Dimension ???
-			*/
-			IF(@@ROWCOUNT = 0 or (SELECT COUNT(*) FROM #A)=0)
-			BEGIN
-				
-				EXECUTE GeoEntitiesQuery @XML
-			
-				UPDATE LogRequest
-				SET [Status] = 1
-				,EndTime = getdate()
-				WHERE QueryUniqueID = @newId
-
-				RETURN
-			END
-
-			/*
-				Shape file reporting.
-				by pass from main system ???
-			*/
-			IF((SELECT COUNT(*) FROM #SELECT WHERE name LIKE 'incomeMount_shape_stack_%') > 0)
-			BEGIN
-				EXECUTE IncomeMountainQuery @XML
-
-				UPDATE LogRequest
-				SET [Status] = 1
-				,EndTime = getdate()
-				WHERE QueryUniqueID = @newId
-
-				RETURN
-			END
-
 			-- extract FROM
 			INSERT INTO #FROM
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
 			FROM @XmlStr.nodes('//root//query//FROM') x(col)
 
 			SELECT @dataSourceID = S.ID 
+			,@factTable = ISNULL(S.[FactTablePivotedName],S.[FactTableName])
 			FROM DimDataSource S INNER JOIN #FROM F
 			ON S.DataSource = F.tab
 
@@ -130,8 +95,6 @@ BEGIN
 			INSERT INTO #wheregeo
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
 			FROM @XmlStr.nodes('//root//query//WHERE//geo') x(col)
-
-			
 
 			--- extract others --
 			INSERT INTO #whereage(AGE)
