@@ -1,8 +1,8 @@
-IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[PreProcessMortalityData]') AND type in (N'P', N'PC'))
-DROP PROCEDURE [dbo].[PreProcessMortalityData]
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[ProcessMortalityData]') AND type in (N'P', N'PC'))
+DROP PROCEDURE [dbo].[ProcessMortalityData]
 GO
 
-/****** Object:  StoredProcedure [dbo].[PreProcessMortalityData]    Script Date: 8/25/2015 5:45:19 PM ******/
+/****** Object:  StoredProcedure [dbo].[ProcessMortalityData]    Script Date: 8/25/2015 5:45:19 PM ******/
 SET ANSI_NULLS ON
 GO
 
@@ -14,7 +14,7 @@ GO
 -- Create date: <Create Date,,>
 -- Description:	<Description,,>
 -- =============================================
-CREATE PROCEDURE [dbo].[PreProcessMortalityData] 
+CREATE PROCEDURE [dbo].[ProcessMortalityData] 
 AS
 BEGIN
 		
@@ -158,6 +158,7 @@ BEGIN
 		--AND S.ID IS NOT NULL
 		--AND gen.ID IS NOT NULL
 
+		EXECUTE [dbo].[PostProcessFactPivot] 'hmd', @versionNo
 		EXECUTE ChangeIndexAndConstraint 'CREATE', 'hmd'
 
 END

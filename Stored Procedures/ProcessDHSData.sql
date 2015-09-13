@@ -1,8 +1,8 @@
-IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[PreProcessDHSData]') AND type in (N'P', N'PC'))
-DROP PROCEDURE [dbo].[PreProcessDHSData]
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[ProcessDHSData]') AND type in (N'P', N'PC'))
+DROP PROCEDURE [dbo].[ProcessDHSData]
 GO
 
-/****** Object:  StoredProcedure [dbo].[PreProcessDHSData]    Script Date: 9/8/2015 5:16:10 PM ******/
+/****** Object:  StoredProcedure [dbo].[ProcessDHSData]    Script Date: 9/8/2015 5:16:10 PM ******/
 SET ANSI_NULLS ON
 GO
 
@@ -14,7 +14,7 @@ GO
 -- Create date: <Create Date,,>
 -- Description:	<Description,,>
 -- =============================================
-CREATE PROCEDURE [dbo].[PreProcessDHSData]
+CREATE PROCEDURE [dbo].[ProcessDHSData]
 AS
 BEGIN
 	
@@ -148,19 +148,22 @@ BEGIN
 				INSERT([DataSourceID],[Indicator Code],[Indicator Name],[TempID]) 
 				VALUES(S.DataSourceID,S.[Indicator Code],S.indicator,S.ID);
 
-			EXECUTE ChangeIndexAndConstraint 'DROP', 'spreedsheet'
+			EXECUTE ChangeIndexAndConstraint 'DROP', 'dhs'
 
-			DELETE FROM [dbo].[FactSpreedSheet]
+			DELETE FROM [dbo].[FactDHS]
 			WHERE VersionID = @versionNo
 
-			INSERT INTO [dbo].[FactSpreedSheet] 
+			INSERT INTO [dbo].[FactDHS] 
 					([VersionID],
 					 [DataSourceID], 
 					 [Country Code], 
 					 [Period], 
 					 [Indicator Code], 
+					 [SubGroup],
+					 [Age],
+					 [Gender],
 					 [Value]) 
-			SELECT 13,c.ID, LEFT(r.[Year],4), i.ID, s.ID, ag.ID, gen.ID, r.DataValue
+			SELECT @versionNo,@dataSourceID,c.ID, LEFT(r.[Year],4), i.ID, s.ID, ag.ID, gen.ID, r.DataValue
 			FROM (
 				SELECT ISO id, Indicator, SubGroup, AgeGroup, Gender, [Year], TRY_CONVERT(float,DataValue) DataValue
 				FROM #MICS f LEFT JOIN (SELECT ISO,CountryMain FROM #GEO GROUP BY ISO,CountryMain) g
@@ -183,7 +186,9 @@ BEGIN
 			)
 			r 
 			LEFT JOIN (
-				SELECT * FROM DimIndicators WHERE DataSourceID = 13
+				SELECT ID,[Indicator Name] 
+				FROM   DimIndicators 
+				WHERE  datasourceid = @dataSourceID
 			) i
 				ON r.Indicator = i.[Indicator Name]
 			LEFT JOIN DimSubGroup s
@@ -194,19 +199,6 @@ BEGIN
 				ON r.AgeGroup = ag.age
 			LEFT JOIN DimGender gen
 				ON r.gender = gen.gender
-			
-			EXECUTE ChangeIndexAndConstraint 'CREATE', 'spreedsheet'
-
-			INSERT INTO FactFinal 
-						([datasourceid], 
-						[country code], 
-						period, 
-						[indicator code], 
-						SubGroup,
-						Age,
-						Gender,
-						[value]) 
-			
 			
 			--DROP TABLE #NATIONAL
 			SELECT CASE CountryName
@@ -221,37 +213,60 @@ BEGIN
 			INTO #NATIONAL
 			FROM [Gapminder_RAW].dhs.Spatial_National_Raw_Data
 
-			INSERT INTO DimIndicators([DataSourceID],[Indicator Code], [Indicator Name])
-			SELECT 13,LEFT(LOWER(REPLACE(indicator,' ', '_')),99), indicator 
-			FROM #NATIONAL 
-			GROUP BY Indicator
+			MERGE DimIndicators T
+			USING (
+				SELECT @dataSourceID DataSourceID
+				,LTRIM(LEFT(LOWER(REPLACE(REPLACE(REPLACE([indicator],' ', '_'),'(',''),')','')),255)) [Indicator Code]
+				, indicator
+				,NULL ID 
+				FROM #NATIONAL 
+				GROUP BY Indicator
+			) S
+			ON (T.[DataSourceID] = S.DataSourceID AND T.[Indicator Name] = S.indicator)
+			WHEN NOT MATCHED BY TARGET THEN 
+				INSERT([DataSourceID],[Indicator Code],[Indicator Name],[TempID]) 
+				VALUES(S.DataSourceID,S.[Indicator Code],S.indicator,S.ID);
 
-			INSERT INTO factfinal 
-					([datasourceid], 
-					[country code], 
-					period, 
-					[indicator code], 
-					[value]) 
-			SELECT 13, c.ID, r.[Year], i.ID, r.DataValue
+			INSERT INTO [dbo].[FactDHS] 
+					([VersionID],
+					 [DataSourceID], 
+					 [Country Code], 
+					 [Period], 
+					 [Indicator Code], 
+					 [Value]) 
+			SELECT @versionNo,@dataSourceID, c.ID, r.[Year], i.ID, r.DataValue
 			FROM ( 
 				SELECT * 
 				FROM #NATIONAL
 			
 			)r 
 			LEFT JOIN (
-				SELECT * FROM DimIndicators WHERE DataSourceID = 13
+				SELECT ID,[Indicator Name] 
+				FROM   DimIndicators 
+				WHERE  datasourceid = @dataSourceID
 			) i
 				ON r.Indicator = i.[Indicator Name]
 			LEFT JOIN (
-				SELECT * FROM DimCountry WHERE [type] = 'country'
+				SELECT ID, [Short Name]
+				FROM DimCountry
+				WHERE [Type] = 'country'
 			)c
 				ON r.CountryName = c.[Short Name]
 
+			UPDATE i
+			SET i.[Indicator Code] = r.IndicatorNameAfter
+			FROM DimIndicators i INNER JOIN UtilityRenameIndicator r
+			ON i.DataSourceID = r.DataSourceID
+			AND i.[Indicator Name] = r.IndicatorNameBefore
+
+			--EXECUTE [dbo].[PostProcessFactPivot] 'dhs', @versionNo
+
+			EXECUTE ChangeIndexAndConstraint 'CREATE', 'dhs'
 
 END
 
 GO
 
---EXECUTE [dbo].[PreProcessDHSData]
+--EXECUTE [dbo].[ProcessDHSData]
 
 

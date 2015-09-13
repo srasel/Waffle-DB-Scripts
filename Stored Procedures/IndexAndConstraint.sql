@@ -44,10 +44,10 @@ BEGIN
 
 				CREATE NONCLUSTERED INDEX NON_DimGender_Gender
 				ON dbo.DimGender ([gender])
-				INCLUDE ([ID])*/
+				INCLUDE ([ID])
 
 				CREATE NONCLUSTERED INDEX NON_DimGeo_Region
-				ON dbo.DimGeo ([Region])
+				ON dbo.DimGeo ([Region])*/
 
 				CREATE NONCLUSTERED INDEX NON_FactFinal_DataSourceID
 				ON dbo.FactFinal ([DataSourceID])
@@ -102,11 +102,12 @@ BEGIN
 
 				IF EXISTS(SELECT * FROM sys.indexes WHERE object_id = object_id('dbo.DimGender') 
 					AND NAME ='NON_DimGender_Gender')
-					DROP INDEX NON_DimGender_Gender ON dbo.DimGender*/
+					DROP INDEX NON_DimGender_Gender ON dbo.DimGender
 
 				IF EXISTS(SELECT * FROM sys.indexes WHERE object_id = object_id('dbo.DimGeo') 
 					AND NAME ='NON_DimGeo_Region')
 					DROP INDEX NON_DimGeo_Region ON dbo.DimGeo
+				*/
 
 				IF EXISTS(SELECT * FROM sys.indexes WHERE object_id = object_id('dbo.FactFinal') 
 					AND NAME ='NON_FactFinal_DataSourceID')

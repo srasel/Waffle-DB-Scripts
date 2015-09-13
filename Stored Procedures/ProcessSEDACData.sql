@@ -1,8 +1,8 @@
-IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[PreProcessSEDACData]') AND type in (N'P', N'PC'))
-DROP PROCEDURE [dbo].[PreProcessSEDACData]
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[ProcessSEDACData]') AND type in (N'P', N'PC'))
+DROP PROCEDURE [dbo].[ProcessSEDACData]
 GO
 
-/****** Object:  StoredProcedure [dbo].[PreProcessSEDACData]    Script Date: 8/18/2015 6:46:08 PM ******/
+/****** Object:  StoredProcedure [dbo].[ProcessSEDACData]    Script Date: 8/18/2015 6:46:08 PM ******/
 SET ANSI_NULLS ON
 GO
 
@@ -14,7 +14,7 @@ GO
 -- Create date: <Create Date,,>
 -- Description:	<Description,,>
 -- =============================================
-CREATE PROCEDURE [dbo].[PreProcessSEDACData]
+CREATE PROCEDURE [dbo].[ProcessSEDACData]
 AS
 BEGIN
 		SET NOCOUNT ON;
@@ -23,7 +23,7 @@ BEGIN
 		SELECT CountryCode, Region, RegionCode
 			, CAST(RegionCode as VARCHAR(200)) id
 			INTO #IMR
-		FROM [dbo].[SEDAC_IMR]
+		FROM [Gapminder_RAW].[sedac].[IMR]
 		GROUP BY CountryCode, Region, RegionCode
 		--select * from #IMR
 		
@@ -74,34 +74,55 @@ BEGIN
 			INSERT([type],[Country Code],[Short Name],[Country Name]) 
 			VALUES(S.cat,LOWER(S.id),S.name,S.name);
 
-		DELETE FROM [dbo].[DimIndicators]
-		WHERE DataSourceID = 11
+		DECLARE @versionNo INT
+		SELECT @versionNo = MAX(VersionNo)
+		FROM UtilityDataVersions
+		WHERE DataSource = 'sedac'
+		GROUP BY DataSource
+		--SELECT @versionNo
 		
-		INSERT INTO DimIndicators([DataSourceID],[Indicator Code], [Indicator Name])
-		SELECT 11,LEFT(LOWER(REPLACE(indicator,' ', '_')),99), indicator 
-		FROM [dbo].[SEDAC_IMR]
-		GROUP BY Indicator
-			UNION
-		SELECT 11,LEFT(LOWER(REPLACE(indicator,' ', '_')),99), indicator 
-		FROM [dbo].[SEDAC_National_Poverty_RawData]
-		WHERE Indicator<>''
-		GROUP BY Indicator
+		DECLARE @dataSourceID INT
+		SELECT @dataSourceID = ID
+		FROM DimDataSource
+		WHERE DataSource = 'sedac'
+		--SELECT @dataSourceID
 
-		--DROP INDEX ix_fact ON FactFinal
+		MERGE DimIndicators T
+		USING (
+			SELECT @dataSourceID DataSourceID
+			,LTRIM(LEFT(LOWER(REPLACE(REPLACE(REPLACE([indicator],' ', '_'),'(',''),')','')),255)) [Indicator Code]
+			, indicator 
+			FROM [Gapminder_RAW].[sedac].[IMR]
+			GROUP BY Indicator
+				UNION
+			SELECT @dataSourceID DataSourceID
+			,LTRIM(LEFT(LOWER(REPLACE(REPLACE(REPLACE([indicator],' ', '_'),'(',''),')','')),255)) [Indicator Code]
+			, indicator 
+			FROM [Gapminder_RAW].[sedac].[National_Poverty_RawData]
+			WHERE Indicator<>''
+			GROUP BY Indicator
+		) S
+		ON (T.[DataSourceID] = S.DataSourceID AND T.[Indicator Name] = S.indicator)
+		WHEN NOT MATCHED BY TARGET THEN 
+			INSERT([DataSourceID],[Indicator Code],[Indicator Name]) 
+			VALUES(S.DataSourceID,S.[Indicator Code],S.indicator);
+		
+		EXECUTE ChangeIndexAndConstraint 'DROP', 'sedac'
 
-		DELETE FROM FactFinal
-		WHERE DataSourceID = 11
+		DELETE FROM [dbo].[FactSEDAC]
+		WHERE VersionID = @versionNo
 
-		INSERT INTO FactFinal 
-					([datasourceid], 
-					[country code], 
-					period, 
-					[indicator code], 
-					[value]) 
-		SELECT 11, r.ID, LEFT(r.Period,4), i.ID, TRY_CONVERT(float,r.DataValue)
+		INSERT INTO [dbo].[FactSEDAC] 
+				([VersionID],
+				 [DataSourceID], 
+				 [Country Code], 
+				 [Period], 
+				 [Indicator Code], 
+				 [Value]) 
+		SELECT @versionNo,@dataSourceID, r.ID, LEFT(r.Period,4), i.ID, TRY_CONVERT(float,r.DataValue)
 		FROM ( 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator
-			FROM [dbo].[SEDAC_IMR] hr
+			FROM [Gapminder_RAW].[sedac].[IMR] hr
 			LEFT JOIN DimCountry dc
 			ON hr.CountryCode = dc.[Country Code]
 			WHERE dc.[Country Code] IS NOT NULL
@@ -110,7 +131,7 @@ BEGIN
 			UNION ALL
 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator  
-			FROM [dbo].[SEDAC_IMR] hr
+			FROM [Gapminder_RAW].[sedac].[IMR] hr
 			LEFT JOIN #IMR f
 			ON hr.RegionCode = F.RegionCode
 			AND hr.CountryCode = f.CountryCode
@@ -121,18 +142,19 @@ BEGIN
 			AND F.id IS NOT NULL
 		)r 
 		LEFT JOIN (
-			SELECT * FROM DimIndicators WHERE DataSourceID = 11
+			SELECT ID,[Indicator Name] 
+			FROM   DimIndicators 
+			WHERE  datasourceid = @dataSourceID
 		) i
 			ON r.Indicator = i.[Indicator Name]
 
-		--SELECT TOP 2 * FROM [dbo].[SEDAC_National_Poverty_RawData]
 		--DROP TABLE #POV
 		SELECT CountryCode,CountryName,Region, 'province' cat
 		,CAST(NULL AS VARCHAR(100)) id
 		INTO #POV
 		FROM (
 			SELECT CountryCode,CountryName,Region, AdmLevel, DENSE_RANK() OVER(PARTITION BY CountryCode,CountryName ORDER BY AdmLevel) rnk 
-			FROM [dbo].[SEDAC_National_Poverty_RawData]
+			FROM [Gapminder_RAW].[sedac].[National_Poverty_RawData]
 			WHERE ISNUMERIC(Region) = 0
 			GROUP BY CountryCode,CountryName, Region, AdmLevel
 
@@ -171,32 +193,30 @@ BEGIN
 			FROM #POV A, [dbo].[GeoHierarchyLevel] G
 			WHERE G.[GeoLevelName] = 'province'
 		) S
-		ON (T.[Country Code] = S.id)
+		ON (T.[Country Code] = S.id AND T.[type] ='province')
 		WHEN NOT MATCHED BY TARGET THEN 
 			INSERT([type],[Country Code],[Short Name],[Country Name]) 
 			VALUES(S.cat,LOWER(S.id),S.name,S.name);
 
-		;WITH CTE
-		AS
-		(
-			SELECT *, ROW_NUMBER() OVER (PARTITION BY [Country Code] ORDER BY [Country Code]) RNK
-			FROM DimCountry
-		)
-		DELETE FROM CTE WHERE RNK > 1
+		--;WITH CTE
+		--AS
+		--(
+		--	SELECT *, ROW_NUMBER() OVER (PARTITION BY [Country Code] ORDER BY [Country Code]) RNK
+		--	FROM DimCountry
+		--)
+		--DELETE FROM CTE WHERE RNK > 1
 
-		DELETE FROM FactFinal
-		WHERE DataSourceID = 11
-
-		INSERT INTO FactFinal 
-					([datasourceid], 
-					[country code], 
-					period, 
-					[indicator code], 
-					[value]) 
-		SELECT 11, r.ID, LEFT(r.Period,4), i.ID, TRY_CONVERT(float,r.DataValue)
+		INSERT INTO [dbo].[FactSEDAC] 
+				([VersionID],
+				 [DataSourceID], 
+				 [Country Code], 
+				 [Period], 
+				 [Indicator Code], 
+				 [Value]) 
+		SELECT @versionNo,@dataSourceID, r.ID, LEFT(r.Period,4), i.ID, TRY_CONVERT(float,r.DataValue)
 		FROM ( 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator
-			FROM [dbo].[SEDAC_National_Poverty_RawData] hr
+			FROM [Gapminder_RAW].[sedac].[National_Poverty_RawData] hr
 			LEFT JOIN DimCountry dc
 			ON hr.CountryCode = dc.[Country Code]
 			WHERE dc.[Country Code] IS NOT NULL
@@ -205,7 +225,7 @@ BEGIN
 			UNION ALL
 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator  
-			FROM [dbo].[SEDAC_National_Poverty_RawData] hr
+			FROM [Gapminder_RAW].[sedac].[National_Poverty_RawData] hr
 			LEFT JOIN #POV f
 			ON hr.Region = F.Region
 			AND hr.CountryCode = f.CountryCode
@@ -216,15 +236,27 @@ BEGIN
 			AND F.id IS NOT NULL
 		)r 
 		LEFT JOIN (
-			SELECT * FROM DimIndicators WHERE DataSourceID = 11
+			SELECT ID,[Indicator Name] 
+			FROM   DimIndicators 
+			WHERE  datasourceid = @dataSourceID
 		) i
 			ON r.Indicator = i.[Indicator Name]
 
+
+		UPDATE i
+		SET i.[Indicator Code] = r.IndicatorNameAfter
+		FROM DimIndicators i INNER JOIN UtilityRenameIndicator r
+		ON i.DataSourceID = r.DataSourceID
+		AND i.[Indicator Name] = r.IndicatorNameBefore
+
+		--EXECUTE [dbo].[PostProcessFactPivot] 'sedac', @versionNo
+
+		EXECUTE ChangeIndexAndConstraint 'CREATE', 'sedac'
 
 END
 
 GO
 
---EXECUTE [dbo].[PreProcessSEDACData]
+--EXECUTE [dbo].[ProcessSEDACData]
 
 

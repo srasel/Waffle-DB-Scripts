@@ -43,6 +43,7 @@ AS
 		EXECUTE [dbo].[PreProcessSEDACData]
 		EXECUTE [dbo].[ProcessAdhocData]
 		--EXECUTE [dbo].[PreProcessMortalityData] 
+		--EXECUTE [dbo].[PreProcessDHSData]
 
 		EXECUTE [dbo].[IndexAndConstraint] 'CREATE'
 

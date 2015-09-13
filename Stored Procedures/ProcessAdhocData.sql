@@ -42,21 +42,26 @@ BEGIN
 		ON I.[Indicator Code] = G.IndicatorCode
 		AND I.DataSourceID = G.DataSource
 
-		DELETE FROM FactFinal
+		DELETE FROM FactSpreedSheet
 		WHERE [Indicator Code] IN (
 			SELECT ID FROM #INDICATORS
 		)
 
-		--DROP TABLE #A
+		DECLARE @versionNo INT
+		SELECT @versionNo = MAX(VersionNo)
+		FROM UtilityDataVersions
+		WHERE DataSource = 'spreedsheet'
+		GROUP BY DataSource
 
-		INSERT INTO FactFinal 
-					([datasourceid], 
+		INSERT INTO FactSpreedSheet 
+					(VersionID,
+					[datasourceid], 
 					[country code], 
 					period, 
 					[indicator code], 
 					[value])
 
-		SELECT  1 ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind, TRY_CONVERT(float,gini) --into #A
+		SELECT  @versionNo, 1 ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind, TRY_CONVERT(float,gini) --into #A
 		FROM dbo.NewDataGiniU5mrChildSurv r LEFT JOIN DimCountry c
 		ON r.geo = c.[Country Code]
 		,#INDICATORS i
@@ -66,7 +71,7 @@ BEGIN
 		
 		UNION ALL
 
-		SELECT  1 ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind, TRY_CONVERT(float,u5mr)
+		SELECT  @versionNo,1 ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind, TRY_CONVERT(float,u5mr)
 		FROM dbo.NewDataGiniU5mrChildSurv r LEFT JOIN DimCountry c
 		ON r.geo = c.[Country Code]
 		,#INDICATORS i
@@ -76,7 +81,7 @@ BEGIN
 
 		UNION ALL
 
-		SELECT  1 ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind, TRY_CONVERT(float,childSurv)
+		SELECT  @versionNo,1 ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind, TRY_CONVERT(float,childSurv)
 		FROM dbo.NewDataGiniU5mrChildSurv r LEFT JOIN DimCountry c
 		ON r.geo = c.[Country Code]
 		,#INDICATORS i

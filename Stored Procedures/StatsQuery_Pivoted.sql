@@ -39,6 +39,7 @@ BEGIN
 		CREATE TABLE #wheresubgroup (id INT, grp VARCHAR(300))
 
 		CREATE TABLE #FROM (tab VARCHAR(100))
+		CREATE TABLE #VERSION (ver VARCHAR(100))
 		CREATE TABLE #time (period INT)
 		/*
 			history of data level available for each source
@@ -70,6 +71,23 @@ BEGIN
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
 			FROM @XmlStr.nodes('//root//query//FROM') x(col)
 
+			INSERT INTO #VERSION
+			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
+			FROM @XmlStr.nodes('//root//query//VERSION') x(col)
+
+			IF(@@ROWCOUNT=0 OR (SELECT TOP 1 VER FROM #VERSION)='')
+			BEGIN
+				TRUNCATE TABLE #VERSION
+				INSERT INTO #VERSION
+				SELECT Max(VersionNo)
+				FROM UtilityDataVersions DV INNER JOIN #FROM F
+				ON DV.DataSource = F.tab
+				GROUP BY DV.DataSource
+			END
+
+			UPDATE #VERSION
+			SET ver =  REPLACE(ver,'v','')
+	
 			SELECT @dataSourceID = S.ID 
 			,@factTable = ISNULL(S.[FactTablePivotedName],S.[FactTableName])
 			FROM DimDataSource S INNER JOIN #FROM F
@@ -282,7 +300,7 @@ BEGIN
 						END
 
 				END
-	
+			
 			-- extract time under WHERE clause
 			INSERT INTO #wheretime
 			SELECT iif(isnull(PARSENAME([val],2),PARSENAME([val],1))='*',-1,isnull(PARSENAME([val],2),PARSENAME([val],1)))
@@ -428,19 +446,19 @@ BEGIN
 				ON g.region = c.id
 				AND C.rnk + 1 <= @reportData
 			)
-			
+
 			SELECT dc.ID, c.par [Country Code], c.parId [Short Name], c.region, c.cat [category]
 			INTO #geoFinal 
 			FROM dimCountry dc 
 			LEFT JOIN (SELECT * FROM cte 
 						WHERE rnk = @reportData--(SELECT lev FROM @availableDataLevel a INNER JOIN #FROM f ON a.ds = f.tab)
 			) c 
-			ON dc.[Short Name] = c.name
+			ON dc.[Country Code] = c.id
 			WHERE c.name IS NOT NULL
 
 			DECLARE @parmDefinition NVARCHAR(500);
 			SET @parmDefinition = N'@start INT, @END INT'
-
+			
 			IF OBJECT_ID('SumTable', 'U') IS NOT NULL
 				DROP TABLE dbo.SumTable
 
@@ -460,57 +478,80 @@ BEGIN
 				)> 0 
 			)
 			BEGIN
+				DECLARE @measureWeighted NVARCHAR(MAX)
+				DECLARE @measureWeightedByPop NVARCHAR(MAX)
+				DECLARE @measureNormal NVARCHAR(MAX)
+				DECLARE @measureFinal NVARCHAR(MAX)
+
+				SELECT @measureWeighted =  stuff(
+					(
+						SELECT ',(ISNULL(['+ I.name + '],0) * ISNULL([pop],0)) [' + I.name + ']'  
+						FROM #whereind I
+						LEFT JOIN (SELECT Indicator FROM UtilityIndicatorCalculation 
+									WHERE CalType = 'weighted') W
+						ON I.name = W.Indicator
+						WHERE W.Indicator IS NOT NULL
+						FOR XML PATH('')
+					)
+				,1,1,'')
+
+				SELECT @measureWeightedByPop =  stuff(
+					(
+						SELECT ', SUM((IIF([' + I.name +'] IS NULL,0,1) * [pop])) OVER(PARTITION BY f.[DataSourceID], f.[Period], f.[SubGroup] ,f.[Age], f.[Gender]) [' + I.name + '_pop]'  
+						FROM #whereind I
+						LEFT JOIN (SELECT Indicator FROM UtilityIndicatorCalculation 
+									WHERE CalType = 'weighted') W
+						ON I.name = W.Indicator
+						WHERE W.Indicator IS NOT NULL
+						FOR XML PATH('')
+					)
+				,1,1,'')
+
+				SELECT @measureFinal =  stuff(
+					(
+						SELECT ', (([' + I.name +'])/([' + I.name + '_pop])) [' + I.name + ']'  
+						FROM #whereind I
+						LEFT JOIN (SELECT Indicator FROM UtilityIndicatorCalculation 
+									WHERE CalType = 'weighted') W
+						ON I.name = W.Indicator
+						WHERE W.Indicator IS NOT NULL
+						FOR XML PATH('')
+					)
+				,1,1,'')
+
+				SELECT @measureNormal =  stuff(
+					(
+						SELECT ',['+ I.name + ']'  
+						FROM #whereind I
+						LEFT JOIN (SELECT Indicator FROM UtilityIndicatorCalculation 
+									WHERE CalType = 'weighted') W
+						ON I.name = W.Indicator
+						WHERE W.Indicator IS NULL
+						FOR XML PATH('')
+					)
+				,1,1,'')
+
 				SET @dyn_sql = N'
-						SELECT [DataSourceID],[Country Code], [Period], [Indicator Code],
-								[Value]/iif(isnull([SumValue],1)=0, 1, isnull([SumValue],1)) [Value]
-								,age
-								,gender
-								, subgroup
-						INTO [FactFinal' + @newId + ']
-						FROM (
-							SELECT par, A.[DataSourceID],A.[Country Code], A.[Period], A.[Indicator Code],
-									(isnull(A.value,0) * isnull(B.value,0)) [Value]
-									, sum(
-										iif(A.value IS NULL, 0, 1) * B.value
-									) over(partition by par, A.[Period], A.[Indicator Code]) [SumValue]
-									,A.[Age] age
-									,A.[Gender] gender
-									,A.[SubGroup] subgroup
-							--INTO [FactFinal' + @newId + ']
-							FROM (
-								SELECT f.*,dc.[Country Code] par,dc.[Short Name] partID  FROM (SELECT [DataSourceID],[country code], [period], [indicator code],[SubGroup],[Age],[Gender],[Value] FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + ' ) f 
-								LEFT JOIN (SELECT * FROM #geoFinal) dc
-								ON f.[Country Code] = dc.ID
-								LEFT JOIN ( SELECT i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] FROM DimIndicators i LEFT JOIN #whereind w ON i.[Indicator Code] = w.name WHERE w.name IS NOT NULL) di
-								ON f.[Indicator Code] = di.ID
-								, #time t 
-								WHERE dc.ID IS NOT NULL
-								AND f.DataSourceID = (SELECT top 1 ID FROM DimDataSource INNER JOIN #FROM ON DataSource = tab)
-								AND di.ID IS NOT NULL
-								AND f.Period = t.period
-							)A LEFT JOIN
-							(
-								SELECT f.* FROM (SELECT [DataSourceID],[country code], [period], [indicator code],[SubGroup],[Age],[Gender],[Value]  FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + ' ) f 
-								LEFT JOIN (SELECT * FROM #geoFinal) dc
-								ON f.[Country Code] = dc.ID
-								LEFT JOIN ( SELECT i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] FROM DimIndicators i WHERE [Indicator Code] = ''pop'') di
-								ON f.[Indicator Code] = di.ID
-								, #time t 
-								WHERE dc.ID IS NOT NULL
-								AND f.DataSourceID = (SELECT top 1 ID FROM DimDataSource INNER JOIN #FROM ON DataSource = tab)
-								AND f.DataSourceID = di.DataSourceID
-								AND di.ID IS NOT NULL
-								AND f.Period = t.period
-							) B 
-							ON A.[DataSourceID] = B.[DataSourceID]
-							AND A.[Country Code] = B.[Country Code]
-							AND A.[Period] = B.[Period]
-						)C
-					'
+					SELECT [DataSourceID], [Country Code], [Period], [SubGroup]
+						,[Age], [Gender],[pop],' + @measureFinal + '
+					INTO [FactFinal' + @newId + ']
+					FROM (
+						SELECT f.[DataSourceID], f.[Country Code], f.[Period], f.[SubGroup]
+						,f.[Age], f.[Gender], ' + @measureNormal + ','  
+						+ @measureWeighted + ',' + @measureWeightedByPop + '  
+						FROM dbo.[' + @factTable + '] f 
+						LEFT JOIN (SELECT * FROM #geoFinal) dc
+						ON f.[Country Code] = dc.ID
+						, #time t 
+						WHERE dc.ID IS NOT NULL
+						AND f.Period = t.period
+					)A
+				'
 				--PRINT @dyn_sql
 				EXECUTE SP_EXECUTESQL @dyn_sql, @parmDefinition, @start = @start, @END = @END
 				--exec('SELECT * FROM [FactFinal' + @newId + ']')
 				SET @factTable = 'FactFinal' + @newId
+				--RETURN;
 			END
 
 			DECLARE @otherJoin VARCHAR(MAX)

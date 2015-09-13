@@ -20,6 +20,7 @@ BEGIN
 				,@dropT NVARCHAR(MAX)
 				,@newId NVARCHAR(MAX)
 				,@factTable NVARCHAR(MAX)
+				,@factTablePivoted NVARCHAR(MAX)
 				,@start INT
 				,@END INT
 				,@counter INT
@@ -38,6 +39,7 @@ BEGIN
 		CREATE TABLE #wheresubgroup (id INT, grp VARCHAR(300))
 
 		CREATE TABLE #FROM (tab VARCHAR(100))
+		CREATE TABLE #VERSION (ver VARCHAR(100))
 		CREATE TABLE #time (period INT)
 		
 		SET @XmlStr = @XML
@@ -103,7 +105,26 @@ BEGIN
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
 			FROM @XmlStr.nodes('//root//query//FROM') x(col)
 
-			SELECT @dataSourceID = S.ID, @factTable = S.FactTableName
+			INSERT INTO #VERSION
+			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
+			FROM @XmlStr.nodes('//root//query//VERSION') x(col)
+
+			IF(@@ROWCOUNT=0 OR (SELECT TOP 1 VER FROM #VERSION)='')
+			BEGIN
+				TRUNCATE TABLE #VERSION
+				INSERT INTO #VERSION
+				SELECT Max(VersionNo)
+				FROM UtilityDataVersions DV INNER JOIN #FROM F
+				ON DV.DataSource = F.tab
+				GROUP BY DV.DataSource
+			END
+
+			UPDATE #VERSION
+			SET ver =  REPLACE(ver,'v','')
+
+			SELECT @dataSourceID = S.ID
+			, @factTable = S.FactTableName
+			,@factTablePivoted = S.FactTablePivotedName
 			FROM DimDataSource S INNER JOIN #FROM F
 			ON S.DataSource = F.tab
 
@@ -116,10 +137,11 @@ BEGIN
 
 			IF(
 				SELECT COUNT(*)
-				FROM #whereind I LEFT JOIN UtilityCommonlyUsedIndicators C
+				FROM #whereind I LEFT JOIN 
+				(SELECT * FROM UtilityCommonlyUsedIndicators WHERE DataSourceID = @dataSourceID) C
 				ON I.name = C.IndicatorCode
 				WHERE C.ID IS NULL
-			) = 0
+			) = 0 AND @factTablePivoted IS NOT NULL
 			BEGIN
 				EXECUTE StatsQuery_Pivoted @XML
 
@@ -707,23 +729,27 @@ END
 
 
 GO
-
+/*
 execute StatsQuery
 '
 <root>
   <query>
     <SELECT>geo</SELECT>
     <SELECT>time</SELECT>
-    <SELECT>co2_per_capita</SELECT>
+    <SELECT>co2_per_cap</SELECT>
     <WHERE>
       <geo>*</geo>
       <geo.cat>country</geo.cat>
-      <time>1852-1996</time>
+      <time>2000</time>
       <quantity />
-	  <age />
+      <age />
+      <gender />
+      <group />
     </WHERE>
     <FROM>spreedsheet</FROM>
+	<VERSION />
   </query>
   <lang>en</lang>
 </root>
 '
+*/

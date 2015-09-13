@@ -40,33 +40,29 @@ BEGIN
 			DELETE FROM ' + @factTablePivotedName + ' WHERE VersionID = ' + @versionNo + '
 		'
 		EXECUTE SP_EXECUTESQL @dyn_sql
-
-		--SET @dyn_sql = N'
-		--	INSERT INTO ' + @factTableName + ' 
-		--	([DataSourceID],[Country Code],[Period],[Indicator Code],[SubGroup],[Age],
-		--	[Gender],[Value])
-		--	SELECT [DataSourceID],[Country Code],[Period],[Indicator Code],[SubGroup],[Age],
-		--	[Gender],[Value] 
-		--	FROM FactFinal
-		--	WHERE [DataSourceID] = '+ @dataSourceID +'
-		--'
-		--EXECUTE SP_EXECUTESQL @dyn_sql
-
-
-		SET @dropT = 'drop TABLE [' + @factTablePivotedName + ']'
-		IF OBJECT_ID('' + @factTablePivotedName + '', 'U') IS NOT NULL
-				EXEC(@dropT)
+		
+		--SET @dropT = 'drop TABLE [' + @factTablePivotedName + ']'
+		--IF OBJECT_ID('' + @factTablePivotedName + '', 'U') IS NOT NULL
+		--		EXEC(@dropT)
 
 		SET @dyn_sql = N'
-			select DataSourceID, [Country Code], Period,SubGroup,Age,Gender,'+ @indicators + '
-			INTO ' + @factTablePivotedName + ' 
+			INSERT INTO ' + @factTablePivotedName + ' 
+			([VersionID],DataSourceID, [Country Code], Period,SubGroup,Age,Gender,'+ @indicators + ')
+			select [VersionID],DataSourceID, [Country Code], Period,SubGroup,Age,Gender,'+ @indicators + '
 			from (
-				select f.DataSourceID, f.[Country Code], f.Period,f.SubGroup,f.Age,f.Gender,i.[Indicator Code],f.Value
+				select F.[VersionID],f.DataSourceID, f.[Country Code], f.Period,f.SubGroup,
+				f.Age,f.Gender,i.[Indicator Code],f.Value
 				from ' + @factTableName + ' f
-				left join (select * from DimIndicators where DataSourceID = ' + @dataSourceID + ') i
-				on f.[Indicator Code] = i.ID
-				--where f.Period between 1950 and 1951
-
+				left join (
+						select di.ID,di.[Indicator Code] 
+						from DimIndicators di 
+						LEFT JOIN UtilityCommonlyUsedIndicators ci
+						ON di.[Indicator Code] = ci.IndicatorCode
+						WHERE di.DataSourceID = ' + @dataSourceID + '
+						AND ci.DataSourceID = ' + @dataSourceID + '
+						AND ci.ID IS NOT NULL
+				) i
+				ON f.[Indicator Code] = i.ID
 			)A
 			pivot(
 				sum(value)
