@@ -87,6 +87,10 @@ BEGIN
 
 			UPDATE #VERSION
 			SET ver =  REPLACE(ver,'v','')
+
+			DECLARE @versionID VARCHAR(10)
+			SELECT TOP 1 @versionID = ver FROM #VERSION
+
 	
 			SELECT @dataSourceID = S.ID 
 			,@factTable = ISNULL(S.[FactTablePivotedName],S.[FactTableName])
@@ -166,6 +170,7 @@ BEGIN
 			SET A.id = DA.ID
 			FROM #whereage A INNER JOIN DimAge DA
 			ON A.age = DA.age
+			WHERE da.DataSourceID = @dataSourceID
 
 			INSERT INTO #wheregender(GENDER)
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
@@ -180,13 +185,14 @@ BEGIN
 					SET @gen = 'both'
 				END
 				INSERT INTO #wheregender (id,gender)
-				SELECT * FROM DimGender WHERE gender = @gen
+				SELECT id,gender FROM DimGender WHERE gender = @gen AND DataSourceID = @dataSourceID
 			END
 
 			UPDATE G
 			SET G.id = DG.ID
 			FROM #wheregender G INNER JOIN DimGender DG
 			ON G.gender = DG.gender
+			WHERE DG.DataSourceID = @dataSourceID
 
 
 			INSERT INTO #wheresubgroup(grp)
@@ -202,13 +208,14 @@ BEGIN
 				--	SET @gen = 'both'
 				--END
 				INSERT INTO #wheresubgroup (id,grp)
-				SELECT * FROM DimSubGroup WHERE SubGroup = @grp
+				SELECT id,SubGroup FROM DimSubGroup WHERE SubGroup = @grp AND DataSourceID = @dataSourceID
 			END
 
 			UPDATE S
 			SET S.id = DS.ID
 			FROM #wheresubgroup S INNER JOIN DimSubGroup DS
 			ON S.grp = DS.SubGroup
+			WHERE DS.DataSourceID = @dataSourceID
 
 			----------------------
 	
@@ -536,7 +543,7 @@ BEGIN
 						,[Age], [Gender],[pop],' + @measureFinal + '
 					INTO [FactFinal' + @newId + ']
 					FROM (
-						SELECT f.[DataSourceID], f.[Country Code], f.[Period], f.[SubGroup]
+						SELECT f.VersionID, f.[DataSourceID], f.[Country Code], f.[Period], f.[SubGroup]
 						,f.[Age], f.[Gender], ' + @measureNormal + ','  
 						+ @measureWeighted + ',' + @measureWeightedByPop + '  
 						FROM dbo.[' + @factTable + '] f 
@@ -545,6 +552,8 @@ BEGIN
 						, #time t 
 						WHERE dc.ID IS NOT NULL
 						AND f.Period = t.period
+						AND f.VersionID = '+ @versionID + '
+						AND f.DataSourceID = (SELECT top 1 ID FROM DimDataSource INNER JOIN #FROM ON DataSource = tab)
 					)A
 				'
 				--PRINT @dyn_sql
@@ -564,7 +573,7 @@ BEGIN
 			SET @dyn_sql = N'
 					SELECT ' + @colInQuerySelection + ', ' + @indColInSelectPivoted + '
 					INTO [SumTable' + @newId + ']
-					FROM (SELECT *  FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + ' ) f 
+					FROM (SELECT * FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + '   AND VersionID='+ @versionID + ') f 
 					LEFT JOIN (SELECT * FROM #geoFinal) dc
 					ON f.[Country Code] = dc.ID
 					LEFT JOIN #whereage ag
@@ -584,7 +593,7 @@ BEGIN
 					AND sg.ID IS NOT NULL
 					group by ' + @colInGroupBy + '
 				'
-			--PRINT @dyn_sql
+			PRINT @dyn_sql
 
 			---return
 			EXECUTE SP_EXECUTESQL @dyn_sql, @parmDefinition, @start = @start, @END = @END
@@ -682,7 +691,7 @@ BEGIN
 
 				DECLARE @val NVARCHAR(MAX)
 				SELECT @val =  stuff((
-				SELECT ',CASE WHEN ['+ I.name +'] IS NOT NULL THEN ['+ I.name +'] ELSE ['+ I.name +'S] + (1. * ['+ I.name+'M] / ['+ I.name +'X]) * (LEAD(['+I.name+'], ['+ I.name +'N], ['+ I.name +'S]) OVER (partition by ' + @colsM + ' ORDER BY [time]) - ['+ I.name +'S]) END [' + I.name + ']'  
+				SELECT ',CASE WHEN ['+ I.name +'] IS NOT NULL THEN ['+ I.name +'] ELSE dbo.fix(['+ I.name +'S] + (1. * ['+ I.name+'M] / ['+ I.name +'X]) * (LEAD(['+I.name+'], ['+ I.name +'N], ['+ I.name +'S]) OVER (partition by ' + @colsM + ' ORDER BY [time]) - ['+ I.name +'S]),4) END [' + I.name + ']'  
 				FROM #whereind I
 				FOR XML PATH('')),1,1,'')
 			

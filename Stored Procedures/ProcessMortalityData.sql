@@ -20,29 +20,6 @@ BEGIN
 		
 		SET NOCOUNT ON;
 
-		MERGE [dbo].[DimAge] T
-		USING (
-			SELECT 'N/A' age 
-			UNION ALL
-			SELECT Age FROM [dbo].[MortalityOrgData]
-			GROUP BY Age
-		) S
-		ON (T.age = S.age)
-		WHEN NOT MATCHED BY TARGET THEN 
-			INSERT(age) 
-			VALUES(S.age);
-
-		MERGE [dbo].[DimGender] T
-		USING (
-			SELECT 'N/A' gender UNION ALL SELECT 'male' UNION ALL
-			SELECT 'female' UNION ALL SELECT 'both' UNION ALL
-			SELECT 'others'
-		) S
-		ON (T.gender = S.gender)
-		WHEN NOT MATCHED BY TARGET THEN 
-			INSERT(gender) 
-			VALUES(S.gender);
-
 		DECLARE @versionNo INT
 		SELECT @versionNo = MAX(VersionNo)
 		FROM UtilityDataVersions
@@ -56,15 +33,42 @@ BEGIN
 		WHERE DataSource = 'hmd'
 		--SELECT @dataSourceID
 
-		DELETE FROM [dbo].[DimIndicators]
-		WHERE DataSourceID = @dataSourceID
+		MERGE [dbo].[DimAge] T
+		USING (
+			SELECT 'N/A' age 
+			UNION ALL
+			SELECT Age FROM [dbo].[MortalityOrgData]
+			GROUP BY Age
+		) S
+		ON (T.age = S.age AND T.DataSourceID = @dataSourceID)
+		WHEN NOT MATCHED BY TARGET THEN 
+			INSERT(age, DataSourceID) 
+			VALUES(S.age, @dataSourceID);
 
-		INSERT INTO DimIndicators([DataSourceID],[Indicator Code], [Indicator Name])
-		SELECT @dataSourceID
-		,LTRIM(LEFT(LOWER(REPLACE(REPLACE(REPLACE([indicator],' ', '_'),'(',''),')','')),255))
-		,indicator 
-		FROM [dbo].[MortalityOrgData]
-		GROUP BY Indicator
+		MERGE [dbo].[DimGender] T
+		USING (
+			SELECT 'N/A' gender UNION ALL SELECT 'male' UNION ALL
+			SELECT 'female' UNION ALL SELECT 'both' UNION ALL
+			SELECT 'others'
+		) S
+		ON (T.gender = S.gender AND T.DataSourceID = @dataSourceID)
+		WHEN NOT MATCHED BY TARGET THEN 
+			INSERT(gender, DataSourceID) 
+			VALUES(S.gender,@dataSourceID);
+
+		MERGE DimIndicators T
+		USING (
+			SELECT @dataSourceID DataSourceID
+			,LTRIM(LEFT(LOWER(REPLACE(REPLACE(REPLACE([indicator],' ', '_'),'(',''),')','')),255))[Indicator Code]
+			,indicator
+			,NULL ID
+			FROM [dbo].[MortalityOrgData]
+			GROUP BY Indicator
+		) S
+		ON (T.[DataSourceID] = S.DataSourceID AND T.[Indicator Name] = S.indicator)
+		WHEN NOT MATCHED BY TARGET THEN 
+			INSERT([DataSourceID],[Indicator Code],[Indicator Name],[TempID]) 
+			VALUES(S.DataSourceID,S.[Indicator Code],S.indicator,S.ID);
 
 		UPDATE i
 		SET i.[Indicator Code] = r.IndicatorNameAfter
@@ -91,15 +95,16 @@ BEGIN
 			SELECT subgroup FROM #A
 			GROUP BY subgroup
 		) S
-		ON (T.SubGroup = S.subgroup)
+		ON (T.SubGroup = S.subgroup AND T.DataSourceID = @dataSourceID)
 		WHEN NOT MATCHED BY TARGET THEN 
-			INSERT(SubGroup) 
-			VALUES(S.subgroup);
+			INSERT(SubGroup, DataSourceID) 
+			VALUES(S.subgroup, @dataSourceID);
 
 		UPDATE A
 		SET A.subGroupID = S.ID
 		FROM #A A INNER JOIN DimSubGroup S
 		ON A.subgroup = S.SubGroup
+		WHERE S.DataSourceID = @dataSourceID
 
 		EXECUTE ChangeIndexAndConstraint 'DROP', 'hmd'
 
@@ -147,11 +152,23 @@ BEGIN
 			ON r.Indicator = i.[Indicator Name]
 		LEFT JOIN (SELECT subgroup,subGroupID ID FROM #A GROUP BY subgroup,subGroupID) s
 			ON r.Subgroup = s.SubGroup
-		LEFT JOIN DimCountry c
+		LEFT JOIN (
+			SELECT ID, [Country Code]
+			FROM DimCountry
+			WHERE [Type] = 'country'
+		) c
 			ON r.id = c.[Country Code]
-		LEFT JOIN DimAge ag
+		LEFT JOIN ( 
+			SELECT ID, age
+			FROM DimAge
+			WHERE  DataSourceID = @dataSourceID
+		)ag
 			ON r.Age = ag.age
-		LEFT JOIN DimGender gen
+		LEFT JOIN (
+			SELECT ID,gender
+			FROM DimGender
+			WHERE  DataSourceID = @dataSourceID
+		) gen
 			ON r.gender = gen.gender
 		--WHERE i.id IS NOT NULL
 		--AND c.id IS NOT NULL
@@ -165,4 +182,4 @@ END
 
 GO
 
-
+-- EXECUTE [dbo].[ProcessMortalityData] 

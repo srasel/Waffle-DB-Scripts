@@ -117,11 +117,18 @@ BEGIN
 				 [DataSourceID], 
 				 [Country Code], 
 				 [Period], 
-				 [Indicator Code], 
+				 [Indicator Code],
+				 [SubGroup],
+				 [Age],
+				 [Gender], 
 				 [Value]) 
-		SELECT @versionNo,@dataSourceID, r.ID, LEFT(r.Period,4), i.ID, TRY_CONVERT(float,r.DataValue)
+		SELECT @versionNo,@dataSourceID, r.ID, LEFT(r.Period,4), i.ID
+				,s.ID
+				,a.ID
+				,g.ID, TRY_CONVERT(float,r.DataValue)
 		FROM ( 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator
+			,'N/A' SubGroup,'N/A' Age,'N/A' Gender
 			FROM [Gapminder_RAW].[sedac].[IMR] hr
 			LEFT JOIN DimCountry dc
 			ON hr.CountryCode = dc.[Country Code]
@@ -131,6 +138,7 @@ BEGIN
 			UNION ALL
 
 			SELECT dc.ID, hr.Period, hr.DataValue,hr.Indicator  
+			,'N/A' SubGroup,'N/A' Age,'N/A' Gender
 			FROM [Gapminder_RAW].[sedac].[IMR] hr
 			LEFT JOIN #IMR f
 			ON hr.RegionCode = F.RegionCode
@@ -147,6 +155,24 @@ BEGIN
 			WHERE  datasourceid = @dataSourceID
 		) i
 			ON r.Indicator = i.[Indicator Name]
+		LEFT JOIN (
+				SELECT ID, SubGroup
+				FROM DimSubGroup
+				WHERE  DataSourceID = @dataSourceID
+		) s
+		ON r.SubGroup = s.SubGroup
+		LEFT JOIN (
+			SELECT ID, age
+			FROM DimAge
+			WHERE  DataSourceID = @dataSourceID
+		) a
+		ON r.Age = a.age
+		LEFT JOIN (
+			SELECT ID,gender
+			FROM DimGender
+			WHERE  DataSourceID = @dataSourceID
+		) g
+		ON r.Gender = g.gender
 
 		--DROP TABLE #POV
 		SELECT CountryCode,CountryName,Region, 'province' cat

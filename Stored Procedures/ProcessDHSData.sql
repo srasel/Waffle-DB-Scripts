@@ -19,6 +19,20 @@ AS
 BEGIN
 	
 			SET NOCOUNT ON;
+
+			DECLARE @versionNo INT
+			SELECT @versionNo = MAX(VersionNo)
+			FROM UtilityDataVersions
+			WHERE DataSource = 'dhs'
+			GROUP BY DataSource
+			--SELECT @versionNo
+		
+			DECLARE @dataSourceID INT
+			SELECT @dataSourceID = ID
+			FROM DimDataSource
+			WHERE DataSource = 'dhs'
+			--SELECT @dataSourceID
+
 			--DROP #MICS
 			SELECT Stratifier 
 			,Country
@@ -106,33 +120,30 @@ BEGIN
 				SELECT SubGroup FROM #MICS
 				GROUP BY SubGroup
 			) S
-			ON (T.SubGroup = S.SubGroup)
+			ON (T.SubGroup = S.SubGroup AND T.DataSourceID = @dataSourceID)
 			WHEN NOT MATCHED BY TARGET THEN 
-				INSERT(SubGroup) 
-				VALUES(S.SubGroup);
+				INSERT(SubGroup,DataSourceID) 
+				VALUES(S.SubGroup,@dataSourceID);
 
 			MERGE [dbo].[DimAge] T
 			USING (
 				SELECT AgeGroup FROM #MICS
 				GROUP BY AgeGroup
 			) S
-			ON (T.age = S.AgeGroup)
+			ON (T.age = S.AgeGroup AND T.DataSourceID = @dataSourceID)
 			WHEN NOT MATCHED BY TARGET THEN 
-				INSERT(age) 
-				VALUES(S.AgeGroup);
+				INSERT(age,DataSourceID) 
+				VALUES(S.AgeGroup,@dataSourceID);
 
-			DECLARE @versionNo INT
-			SELECT @versionNo = MAX(VersionNo)
-			FROM UtilityDataVersions
-			WHERE DataSource = 'dhs'
-			GROUP BY DataSource
-			--SELECT @versionNo
-		
-			DECLARE @dataSourceID INT
-			SELECT @dataSourceID = ID
-			FROM DimDataSource
-			WHERE DataSource = 'dhs'
-			--SELECT @dataSourceID
+			MERGE [dbo].[DimGender] T
+			USING (
+				SELECT Gender FROM #MICS
+				GROUP BY Gender
+			) S
+			ON (T.gender = S.gender AND T.DataSourceID = @dataSourceID)
+			WHEN NOT MATCHED BY TARGET THEN 
+				INSERT(gender,DataSourceID) 
+				VALUES(S.gender,@dataSourceID);
 
 			MERGE DimIndicators T
 			USING (
@@ -191,13 +202,29 @@ BEGIN
 				WHERE  datasourceid = @dataSourceID
 			) i
 				ON r.Indicator = i.[Indicator Name]
-			LEFT JOIN DimSubGroup s
+			LEFT JOIN (
+				SELECT ID, SubGroup
+				FROM DimSubGroup
+				WHERE  DataSourceID = @dataSourceID
+			) s
 				ON r.Subgroup = s.SubGroup
-			LEFT JOIN DimCountry c
+			LEFT JOIN (
+				SELECT ID, [Country Code]
+				FROM DimCountry
+				WHERE [Type] IN ('country', 'province')
+			) c
 				ON r.id = c.[Country Code]
-			LEFT JOIN DimAge ag
+			LEFT JOIN (
+				SELECT ID, age
+				FROM DimAge
+				WHERE  DataSourceID = @dataSourceID
+			) ag
 				ON r.AgeGroup = ag.age
-			LEFT JOIN DimGender gen
+			LEFT JOIN (
+				SELECT ID,gender
+				FROM DimGender
+				WHERE  DataSourceID = @dataSourceID
+			) gen
 				ON r.gender = gen.gender
 			
 			--DROP TABLE #NATIONAL
@@ -233,10 +260,16 @@ BEGIN
 					 [Country Code], 
 					 [Period], 
 					 [Indicator Code], 
+					 [SubGroup],
+					 [Age],
+					 [Gender],
 					 [Value]) 
-			SELECT @versionNo,@dataSourceID, c.ID, r.[Year], i.ID, r.DataValue
+			SELECT @versionNo,@dataSourceID, c.ID, r.[Year], i.ID
+				,s.ID
+				,a.ID
+				,g.ID, r.DataValue
 			FROM ( 
-				SELECT * 
+				SELECT * ,'N/A' SubGroup,'N/A' Age,'N/A' Gender
 				FROM #NATIONAL
 			
 			)r 
@@ -252,6 +285,25 @@ BEGIN
 				WHERE [Type] = 'country'
 			)c
 				ON r.CountryName = c.[Short Name]
+			LEFT JOIN (
+				SELECT ID, SubGroup
+				FROM DimSubGroup
+				WHERE  DataSourceID = @dataSourceID
+			) s
+			ON r.SubGroup = s.SubGroup
+			LEFT JOIN (
+				SELECT ID, age
+				FROM DimAge
+				WHERE  DataSourceID = @dataSourceID
+			) a
+			ON r.Age = a.age
+			LEFT JOIN (
+				SELECT ID,gender
+				FROM DimGender
+				WHERE  DataSourceID = @dataSourceID
+			) g
+			ON r.Gender = g.gender
+
 
 			UPDATE i
 			SET i.[Indicator Code] = r.IndicatorNameAfter

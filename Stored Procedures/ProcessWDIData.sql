@@ -112,16 +112,22 @@ BEGIN
 			[DataSourceID], 
 			[Country Code], 
 			[Period], 
-			[Indicator Code], 
+			[Indicator Code],
+			[SubGroup],
+			[Age],
+			[Gender], 
 			[Value]
 		)
 		SELECT 
 			@versionNo,@dataSourceID, 
 			dc.id, 
 			TRY_CONVERT(int, fd.period), 
-			di.id, 
+			di.id,
+			s.ID,
+			a.ID,
+			g.ID ,
 			TRY_CONVERT(float, fd.[value]) 
-		FROM dbo.WDI_Data fd 
+		FROM (SELECT *,'N/A' SubGroup,'N/A' Age,'N/A' Gender FROM dbo.WDI_Data) fd 
 			LEFT JOIN (
 				SELECT ID,[Indicator Code] 
 				FROM   DimIndicators 
@@ -134,6 +140,24 @@ BEGIN
 				WHERE [Type] = 'country'
 			) dc 
 			ON fd.[country name] = dc.[short name] 
+			LEFT JOIN (
+				SELECT ID, SubGroup
+				FROM DimSubGroup
+				WHERE  DataSourceID = @dataSourceID
+			) s
+			ON fd.SubGroup = s.SubGroup
+			LEFT JOIN (
+				SELECT ID, age
+				FROM DimAge
+				WHERE  DataSourceID = @dataSourceID
+			) a
+			ON fd.Age = a.age
+			LEFT JOIN (
+				SELECT ID,gender
+				FROM DimGender
+				WHERE  DataSourceID = @dataSourceID
+			) g
+			ON fd.Gender = g.gender
 		WHERE  di.id IS NOT NULL 
 		AND dc.id IS NOT NULL 
 

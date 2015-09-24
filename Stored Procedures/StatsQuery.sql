@@ -121,6 +121,9 @@ BEGIN
 
 			UPDATE #VERSION
 			SET ver =  REPLACE(ver,'v','')
+			
+			DECLARE @versionID VARCHAR(10)
+			SELECT TOP 1 @versionID = ver FROM #VERSION
 
 			SELECT @dataSourceID = S.ID
 			, @factTable = S.FactTableName
@@ -229,6 +232,7 @@ BEGIN
 			SET A.id = DA.ID
 			FROM #whereage A INNER JOIN DimAge DA
 			ON A.age = DA.age
+			WHERE da.DataSourceID = @dataSourceID
 
 			INSERT INTO #wheregender(GENDER)
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
@@ -243,13 +247,14 @@ BEGIN
 					SET @gen = 'both'
 				END
 				INSERT INTO #wheregender (id,gender)
-				SELECT * FROM DimGender WHERE gender = @gen
+				SELECT id,gender FROM DimGender WHERE gender = @gen AND DataSourceID = @dataSourceID
 			END
 
 			UPDATE G
 			SET G.id = DG.ID
 			FROM #wheregender G INNER JOIN DimGender DG
 			ON G.gender = DG.gender
+			WHERE DG.DataSourceID = @dataSourceID
 
 
 			INSERT INTO #wheresubgroup(grp)
@@ -265,13 +270,14 @@ BEGIN
 				--	SET @gen = 'both'
 				--END
 				INSERT INTO #wheresubgroup (id,grp)
-				SELECT * FROM DimSubGroup WHERE SubGroup = @grp
+				SELECT id,SubGroup FROM DimSubGroup WHERE SubGroup = @grp AND DataSourceID = @dataSourceID
 			END
 
 			UPDATE S
 			SET S.id = DS.ID
 			FROM #wheresubgroup S INNER JOIN DimSubGroup DS
 			ON S.grp = DS.SubGroup
+			WHERE DS.DataSourceID = @dataSourceID
 
 			----------------------
 	
@@ -546,7 +552,7 @@ BEGIN
 									,A.[SubGroup] subgroup
 							--INTO [FactFinal' + @newId + ']
 							FROM (
-								SELECT f.*,dc.[Country Code] par,dc.[Short Name] partID  FROM (SELECT [DataSourceID],[country code], [period], [indicator code],[SubGroup],[Age],[Gender],[Value] FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + ' ) f 
+								SELECT f.*,dc.[Country Code] par,dc.[Short Name] partID  FROM (SELECT VersionID,[DataSourceID],[country code], [period], [indicator code],[SubGroup],[Age],[Gender],[Value] FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + ' AND VersionID='+ @versionID + ') f 
 								LEFT JOIN (SELECT * FROM #geoFinal) dc
 								ON f.[Country Code] = dc.ID
 								LEFT JOIN ( SELECT i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] FROM DimIndicators i LEFT JOIN #whereind w ON i.[Indicator Code] = w.name WHERE w.name IS NOT NULL) di
@@ -558,7 +564,7 @@ BEGIN
 								AND f.Period = t.period
 							)A LEFT JOIN
 							(
-								SELECT f.* FROM (SELECT [DataSourceID],[country code], [period], [indicator code],[SubGroup],[Age],[Gender],[Value]  FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + ' ) f 
+								SELECT f.* FROM (SELECT VersionID,[DataSourceID],[country code], [period], [indicator code],[SubGroup],[Age],[Gender],[Value]  FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + '  AND VersionID='+ @versionID + ') f 
 								LEFT JOIN (SELECT * FROM #geoFinal) dc
 								ON f.[Country Code] = dc.ID
 								LEFT JOIN ( SELECT i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] FROM DimIndicators i WHERE [Indicator Code] = ''pop'') di
@@ -586,11 +592,12 @@ BEGIN
 			--select * from #whereind
 			--select * from #wheregender
 			--select * from #wheresubgroup
+			--return
 
 			SET @dyn_sql = N'
 					SELECT ' + @colInQuerySelection + ', sum(f.Value) val,  di.[Indicator Code]
 					INTO [SumTable' + @newId + ']
-					FROM (SELECT [DataSourceID],[country code], [period], [indicator code],[SubGroup],[Age],[Gender],[Value]  FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + ' ) f 
+					FROM (SELECT VersionID,[DataSourceID],[country code], [period], [indicator code],[SubGroup],[Age],[Gender],[Value]  FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + '   AND VersionID='+ @versionID + ') f 
 					LEFT JOIN (SELECT * FROM #geoFinal) dc
 					ON f.[Country Code] = dc.ID
 					LEFT JOIN ( SELECT i.[ID],i.[dataSourceID], [Indicator Code], i.[Indicator Name] FROM DimIndicators i LEFT JOIN #whereind w ON i.[Indicator Code] = w.name WHERE w.name IS NOT NULL) di
@@ -729,27 +736,33 @@ END
 
 
 GO
-/*
+
 execute StatsQuery
 '
 <root>
   <query>
     <SELECT>geo</SELECT>
     <SELECT>time</SELECT>
-    <SELECT>co2_per_cap</SELECT>
+    <SELECT>geo.name</SELECT>
+    <SELECT>geo.region</SELECT>
+    <SELECT>age</SELECT>
+    <SELECT>gender</SELECT>
+    <SELECT>group</SELECT>
+    <SELECT>pop</SELECT>
+    <SELECT>cexposures</SELECT>
+    <SELECT>death_rates_period</SELECT>
     <WHERE>
       <geo>*</geo>
-      <geo.cat>country</geo.cat>
-      <time>2000</time>
+      <geo.cat>region</geo.cat>
+      <time>2010</time>
       <quantity />
       <age />
       <gender />
       <group />
     </WHERE>
-    <FROM>spreedsheet</FROM>
-	<VERSION />
+    <FROM>hmd</FROM>
+    <VERSION />
   </query>
   <lang>en</lang>
 </root>
 '
-*/

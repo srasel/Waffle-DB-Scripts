@@ -96,6 +96,19 @@ BEGIN
 		FROM cte c INNER JOIN GeoHierarchyLevel g
 		ON c.cat = g.GeoLevelName
 
+		DECLARE @versionNo INT
+		SELECT @versionNo = MAX(VersionNo)
+		FROM UtilityDataVersions
+		WHERE DataSource = 'devinfo'
+		GROUP BY DataSource
+		--SELECT @versionNo
+		
+		DECLARE @dataSourceID INT
+		SELECT @dataSourceID = ID
+		FROM DimDataSource
+		WHERE DataSource = 'devinfo'
+		--SELECT @dataSourceID
+
 		MERGE DimGeo T
 		USING (
 			SELECT * FROM #final
@@ -122,29 +135,16 @@ BEGIN
 			FROM AllDevInfoRawData
 			GROUP BY Subgroup
 		) S
-		ON (T.SubGroup = S.SubGroup)
+		ON (T.SubGroup = S.SubGroup AND T.DataSourceID = @dataSourceID)
 		WHEN NOT MATCHED BY TARGET THEN 
-			INSERT(SubGroup) 
-			VALUES(S.SubGroup);
-
-		DECLARE @versionNo INT
-		SELECT @versionNo = MAX(VersionNo)
-		FROM UtilityDataVersions
-		WHERE DataSource = 'devinfo'
-		GROUP BY DataSource
-		--SELECT @versionNo
-		
-		DECLARE @dataSourceID INT
-		SELECT @dataSourceID = ID
-		FROM DimDataSource
-		WHERE DataSource = 'devinfo'
-		--SELECT @dataSourceID
+			INSERT(SubGroup,DataSourceID) 
+			VALUES(S.SubGroup,@dataSourceID);
 
 		MERGE DimIndicators T
 		USING (
 			SELECT @dataSourceID DataSourceID
 			,LTRIM(LEFT(LOWER(REPLACE(REPLACE(REPLACE([indicator],' ', '_'),'(',''),')','')),255)) [Indicator Code]
-			, indicator
+			, indicator + ' (' + Unit + ')' [indicator]
 			,Unit
 			,NULL ID 
 			FROM dbo.AllDevInfoRawData 
@@ -167,17 +167,23 @@ BEGIN
 				 [Period], 
 				 [Indicator Code], 
 				 [SubGroup],
+				 [Age],
+				 [Gender],
 				 [Value]) 
 		
-		SELECT @versionNo,@dataSourceID,c.ID, TRY_CONVERT(int, r.[Year]), i.ID, s.ID, TRY_CONVERT(float,r.DataValue)
-		FROM dbo.AllDevInfoRawData  r 
+		SELECT @versionNo,@dataSourceID,c.ID, TRY_CONVERT(int, r.[Year]), i.ID, s.ID,a.id,g.id, TRY_CONVERT(float,r.DataValue)
+		FROM (SELECT *,'N/A' Age,'N/A' Gender FROM dbo.AllDevInfoRawData)  r 
 		LEFT JOIN (
 			SELECT ID,[Indicator Name]
 			FROM   DimIndicators 
 			WHERE  datasourceid = @dataSourceID
 		) i
-			ON r.Indicator = i.[Indicator Name]
-		LEFT JOIN DimSubGroup s
+			ON (r.indicator + ' (' + r.Unit + ')') = i.[Indicator Name]
+		LEFT JOIN (
+			SELECT ID, SubGroup
+			FROM DimSubGroup
+			WHERE  DataSourceID = @dataSourceID
+		) s
 			ON r.Subgroup = s.SubGroup
 		LEFT JOIN (
 			SELECT ID, [Country Code],[Type]
@@ -185,6 +191,18 @@ BEGIN
 			--WHERE [Type] = 'country'
 		) c
 			ON r.AreaCode = c.[Country Code]
+		LEFT JOIN (
+				SELECT ID, age
+				FROM DimAge
+				WHERE  DataSourceID = @dataSourceID
+		) a
+		ON r.Age = a.age
+		LEFT JOIN (
+			SELECT ID,gender
+			FROM DimGender
+			WHERE  DataSourceID = @dataSourceID
+		) g
+		ON r.Gender = g.gender
 		WHERE i.id IS NOT NULL
 		AND c.id IS NOT NULL
 		AND S.ID IS NOT NULL
@@ -195,7 +213,7 @@ BEGIN
 		ON i.DataSourceID = r.DataSourceID
 		AND i.[Indicator Name] = r.IndicatorNameBefore
 
-		EXECUTE [dbo].[PostProcessFactPivot] 'devinfo', @versionNo
+		EXECUTE [dbo].[PostProcessFactPivot] 'devinfo',@versionNo
 
 		EXECUTE ChangeIndexAndConstraint 'CREATE', 'devinfo'
 
@@ -203,4 +221,4 @@ END
 
 GO
 
-
+--EXECUTE ProcessDevInfoData

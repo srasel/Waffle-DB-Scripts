@@ -57,8 +57,14 @@ BEGIN
 				 [Country Code], 
 				 [Period], 
 				 [Indicator Code], 
+				 [SubGroup],
+				 [Age],
+				 [Gender],
 				 [Value]) 
-		SELECT @versionNo,@dataSourceID, c.ID, r.Period, i.ID, r.DataValue
+		SELECT @versionNo,@dataSourceID, c.ID, r.Period, i.ID
+				,s.ID
+				,a.ID
+				,g.ID, r.DataValue
 		FROM ( 
 				SELECT CASE Country
 				WHEN 'KYRGYZSTAN' THEN 'Kyrgyz Republic'
@@ -73,6 +79,7 @@ BEGIN
 				,Period
 				,Indicator
 				,TRY_CONVERT(float,DataValue) DataValue
+				,'N/A' SubGroup,'N/A' Age,'N/A' Gender
 				FROM [Gapminder_RAW].[gecon].[Raw_Data]
 				WHERE PERIOD <> ''
 		)r 
@@ -88,6 +95,24 @@ BEGIN
 			WHERE [Type] = 'country'
 		)c
 			ON r.Country = c.[Short Name]
+		LEFT JOIN (
+			SELECT ID, SubGroup
+			FROM DimSubGroup
+			WHERE  DataSourceID = @dataSourceID
+		) s
+		ON r.SubGroup = s.SubGroup
+		LEFT JOIN (
+			SELECT ID, age
+			FROM DimAge
+			WHERE  DataSourceID = @dataSourceID
+		) a
+		ON r.Age = a.age
+		LEFT JOIN (
+			SELECT ID,gender
+			FROM DimGender
+			WHERE  DataSourceID = @dataSourceID
+		) g
+		ON r.Gender = g.gender
 
 		UPDATE i
 		SET i.[Indicator Code] = r.IndicatorNameAfter
@@ -103,4 +128,4 @@ END
 
 GO
 
-
+-- EXECUTE [dbo].[ProcessGECONData]

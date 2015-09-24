@@ -76,17 +76,23 @@ BEGIN
 				 [Country Code], 
 				 [Period], 
 				 [Indicator Code], 
+				 [SubGroup],
+				 [Age],
+				 [Gender],
 				 [Value]) 
 		SELECT @versionNo,@dataSourceID, 
 			dc.id, 
 			TRY_CONVERT(int,LEFT(r.[time], 4)), 
-			di.id, 
+			di.id,
+			s.ID,
+			a.ID,
+			g.ID,
 			CASE 
 				WHEN r.indicator LIKE 'population%' THEN 
 					 TRY_CONVERT(float,r.[value]) * 1000000
 				ELSE TRY_CONVERT(float,r.[value])
 			END 
-		FROM dbo.IMFAllRawData r 
+		FROM (SELECT *,'N/A' SubGroup,'N/A' Age,'N/A' Gender FROM dbo.IMFAllRawData) r 
 		LEFT JOIN (
 				SELECT ID,[Indicator Name] 
 				FROM   DimIndicators 
@@ -99,6 +105,25 @@ BEGIN
 				WHERE [Type] = 'country'
 		) dc
 		ON r.geo = dc.[country code]
+		LEFT JOIN (
+			SELECT ID, SubGroup
+			FROM DimSubGroup
+			WHERE  DataSourceID = @dataSourceID
+		) s
+		ON R.SubGroup = s.SubGroup
+		LEFT JOIN (
+			SELECT ID, age
+			FROM DimAge
+			WHERE  DataSourceID = @dataSourceID
+		) a
+		ON R.Age = a.age
+		LEFT JOIN (
+			SELECT ID,gender
+			FROM DimGender
+			WHERE  DataSourceID = @dataSourceID
+		) g
+		ON R.Gender = g.gender
+
 		WHERE di.id IS NOT NULL 
 		AND dc.ID IS NOT NULL
 

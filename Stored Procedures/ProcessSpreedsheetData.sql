@@ -125,19 +125,28 @@ BEGIN
 				 [DataSourceID], 
 				 [Country Code], 
 				 [Period], 
-				 [Indicator Code], 
+				 [Indicator Code],
+				 [SubGroup],
+				 [Age],
+				 [Gender],
 				 [Value]) 
 		SELECT	@versionNo
 				,@dataSourceID
 				,dc.id 
 				,TRY_CONVERT(int, fd.period) 
-				,di.id 
+				,di.id
+				,s.ID
+				,a.ID
+				,g.ID
 				,TRY_CONVERT(float, fd.[value]) 
-		FROM [dbo].[SpreedSheetAllRawData] fd 
+		FROM (
+				SELECT *,'N/A' SubGroup,'N/A' Age,'N/A' Gender
+				FROM [dbo].[SpreedSheetAllRawData]
+		) fd 
 			LEFT JOIN (
 				SELECT ID,TempID 
 				FROM   DimIndicators 
-				WHERE  datasourceid = @dataSourceID
+				WHERE  DataSourceID = @dataSourceID
 			) di 
 			ON fd.pathid = di.tempid 
 			LEFT JOIN (
@@ -146,6 +155,24 @@ BEGIN
 				WHERE [Type] = 'country'
 			) dc 
 			ON fd.country = dc.[short name] 
+			LEFT JOIN (
+				SELECT ID, SubGroup
+				FROM DimSubGroup
+				WHERE  DataSourceID = @dataSourceID
+			) s
+			ON fd.SubGroup = s.SubGroup
+			LEFT JOIN (
+				SELECT ID, age
+				FROM DimAge
+				WHERE  DataSourceID = @dataSourceID
+			) a
+			ON fd.Age = a.age
+			LEFT JOIN (
+				SELECT ID,gender
+				FROM DimGender
+				WHERE  DataSourceID = @dataSourceID
+			) g
+			ON fd.Gender = g.gender
 			WHERE  di.id IS NOT NULL 
 			AND dc.id IS NOT NULL
 		
@@ -160,6 +187,76 @@ BEGIN
 		EXECUTE [dbo].[PostProcessFactPivot] 'spreedsheet', @versionNo
 
 		EXECUTE ChangeIndexAndConstraint 'CREATE', 'spreedsheet'
+
+
+		/*
+			DROP TABLE [dbo].[DimIndicatorsMetaData]
+			CREATE TABLE [dbo].[DimIndicatorsMetaData](
+				[ID] [varchar](50) NULL,
+				[Name] [varchar](200) NULL,
+				[Val] [varchar](500) NULL
+			) ON [PRIMARY]
+
+			DECLARE @dyn_sql NVARCHAR(max)
+			SET @dyn_sql = 
+				N'
+					BULK INSERT [dbo].[DimIndicatorsMetaData]
+					FROM ''C:\Users\shahnewaz\Documents\GapMinder_DEV\spreedsheet\Settings.txt'' 
+					WITH 
+						( 
+						fieldterminator = '','', 
+						rowterminator = ''\n'' 
+						) 
+				'
+			EXECUTE sp_executesql @dyn_sql
+
+			UPDATE DimIndicatorsMetaData
+			SET NAME = 'Scale type'
+			WHERE NAME = 'Scale type (log or lin)'
+
+			UPDATE MD
+			SET Name = CASE  WHEN VAL = 'LOG' THEN 'Scale type'
+								WHEN VAL LIKE 'http://' THEN 'Source link'
+								WHEN VAL = '' THEN ''
+							ELSE NAME END
+			FROM [dbo].[DimIndicatorsMetaData] MD
+			WHERE MD.ID IN (
+				select ID from [dbo].[DimIndicatorsMetaData]
+				where name not in ('source name','source link','scale type')
+				GROUP BY ID
+				HAVING COUNT(*)=3
+			)
+
+			UPDATE MD
+			SET Name = CASE WHEN VAL LIKE 'http://' THEN 'Source link'
+							ELSE 'Source name' END
+			FROM [dbo].[DimIndicatorsMetaData] MD
+			WHERE MD.ID IN (
+				select ID from [dbo].[DimIndicatorsMetaData]
+				where name not in ('source name','source link','scale type')
+				GROUP BY ID
+				HAVING COUNT(*)= 2
+			)
+
+			SELECT * INTO #A
+			FROM [dbo].[DimIndicatorsMetaData]
+
+			DROP TABLE [dbo].[DimIndicatorsMetaData]
+			select *
+			INTO [dbo].[DimIndicatorsMetaData]
+			from (
+				select * from #A
+
+			)A
+			pivot(
+				max(val)
+				for [name] in ([Source name],[Source link],[Scale Type])
+			) as pvt
+
+
+
+
+		*/
 
 END
 

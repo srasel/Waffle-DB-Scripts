@@ -17,77 +17,114 @@ GO
 CREATE PROCEDURE [dbo].[ProcessAdhocData] 
 AS
 BEGIN
-		SET NOCOUNT ON;
+			SET NOCOUNT ON;
 
-		--DROP TABLE #GINI
-		SELECT 1 DataSource, 'gini' IndicatorCode
-			INTO #GINI
-		UNION ALL
-		SELECT 1 DataSource, 'u5mr' IndicatorCode
-		UNION ALL
-		SELECT 1 DataSource, 'childSurv' IndicatorCode
+			DECLARE @versionNo INT
+			SELECT @versionNo = MAX(VersionNo)
+			FROM UtilityDataVersions
+			WHERE DataSource = 'spreedsheet'
+			GROUP BY DataSource
+			--SELECT @versionNo
 		
-		MERGE dbo.DimIndicators T
-		USING (
-			SELECT * FROM #GINI
-		) S
-		ON (T.[Indicator Code] = S.IndicatorCode)
-		WHEN NOT MATCHED BY TARGET THEN 
-			INSERT([DataSourceID],[Indicator Code],[Indicator Name]) 
-			VALUES(S.DataSource,S.IndicatorCode,S.IndicatorCode);
+			DECLARE @dataSourceID INT
+			SELECT @dataSourceID = ID
+			FROM DimDataSource
+			WHERE DataSource = 'spreedsheet'
+			--SELECT @dataSourceID
 
-		--DROP TABLE #INDICATORS
-		SELECT ID,IndicatorCode INTO #INDICATORS
-		FROM DimIndicators I INNER JOIN #GINI G
-		ON I.[Indicator Code] = G.IndicatorCode
-		AND I.DataSourceID = G.DataSource
-
-		DELETE FROM FactSpreedSheet
-		WHERE [Indicator Code] IN (
-			SELECT ID FROM #INDICATORS
-		)
-
-		DECLARE @versionNo INT
-		SELECT @versionNo = MAX(VersionNo)
-		FROM UtilityDataVersions
-		WHERE DataSource = 'spreedsheet'
-		GROUP BY DataSource
-
-		INSERT INTO FactSpreedSheet 
-					(VersionID,
-					[datasourceid], 
-					[country code], 
-					period, 
-					[indicator code], 
-					[value])
-
-		SELECT  @versionNo, 1 ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind, TRY_CONVERT(float,gini) --into #A
-		FROM dbo.NewDataGiniU5mrChildSurv r LEFT JOIN DimCountry c
-		ON r.geo = c.[Country Code]
-		,#INDICATORS i
-		WHERE c.[Country Code] IS NOT NULL
-		AND c.[Type] = 'country'
-		AND I.IndicatorCode = 'gini'
+			--DROP TABLE #GINI
+			SELECT @dataSourceID DataSource, 'gini' IndicatorCode
+				INTO #GINI
+			UNION ALL
+			SELECT @dataSourceID DataSource, 'u5mr' IndicatorCode
+			UNION ALL
+			SELECT @dataSourceID DataSource, 'childSurv' IndicatorCode
 		
-		UNION ALL
+			MERGE dbo.DimIndicators T
+			USING (
+				SELECT * FROM #GINI
+			) S
+			ON (T.[Indicator Code] = S.IndicatorCode AND T.DataSourceID = @dataSourceID)
+			WHEN NOT MATCHED BY TARGET THEN 
+				INSERT([DataSourceID],[Indicator Code],[Indicator Name]) 
+				VALUES(S.DataSource,S.IndicatorCode,S.IndicatorCode);
 
-		SELECT  @versionNo,1 ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind, TRY_CONVERT(float,u5mr)
-		FROM dbo.NewDataGiniU5mrChildSurv r LEFT JOIN DimCountry c
-		ON r.geo = c.[Country Code]
-		,#INDICATORS i
-		WHERE c.[Country Code] IS NOT NULL
-		AND c.[Type] = 'country'
-		AND I.IndicatorCode = 'u5mr'
+			--DROP TABLE #INDICATORS
+			SELECT ID,IndicatorCode INTO #INDICATORS
+			FROM DimIndicators I INNER JOIN #GINI G
+			ON I.[Indicator Code] = G.IndicatorCode
+			AND I.DataSourceID = G.DataSource
 
-		UNION ALL
+			DELETE FROM FactSpreedSheet
+			WHERE [Indicator Code] IN (
+				SELECT ID FROM #INDICATORS
+			) AND VersionID = @versionNo
 
-		SELECT  @versionNo,1 ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind, TRY_CONVERT(float,childSurv)
-		FROM dbo.NewDataGiniU5mrChildSurv r LEFT JOIN DimCountry c
-		ON r.geo = c.[Country Code]
-		,#INDICATORS i
-		WHERE c.[Country Code] IS NOT NULL
-		AND c.[Type] = 'country'
-		AND I.IndicatorCode = 'childSurv'
+			INSERT INTO FactSpreedSheet 
+						(VersionID,
+						[datasourceid], 
+						[country code], 
+						period, 
+						[indicator code], 
+						[SubGroup],
+						[Age],
+						[Gender],
+						[value])
+
+			SELECT VersionID,ds,CID,Period,IND,s.ID,a.ID,g.ID, Val
+			FROM (
+				SELECT  @versionNo VersionID, @dataSourceID ds, c.ID CID, TRY_CONVERT(INT, r.[time]) Period
+				, i.ID IND, TRY_CONVERT(float,gini) Val --into #A
+				,'N/A' SubGroup,'N/A' Age,'N/A' Gender
+				FROM dbo.NewDataGiniU5mrChildSurv r LEFT JOIN DimCountry c
+				ON r.geo = c.[Country Code]
+				,#INDICATORS i
+				WHERE c.[Country Code] IS NOT NULL
+				AND c.[Type] = 'country'
+				AND I.IndicatorCode = 'gini'
+		
+				UNION ALL
+
+				SELECT  @versionNo,@dataSourceID ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind
+				, TRY_CONVERT(float,u5mr)
+				,'N/A' SubGroup,'N/A' Age,'N/A' Gender
+				FROM dbo.NewDataGiniU5mrChildSurv r LEFT JOIN DimCountry c
+				ON r.geo = c.[Country Code]
+				,#INDICATORS i
+				WHERE c.[Country Code] IS NOT NULL
+				AND c.[Type] = 'country'
+				AND I.IndicatorCode = 'u5mr'
+
+				UNION ALL
+
+				SELECT  @versionNo,@dataSourceID ds, c.ID, TRY_CONVERT(INT, r.[time]) per, i.ID ind
+				, TRY_CONVERT(float,childSurv)
+				,'N/A' SubGroup,'N/A' Age,'N/A' Gender
+				FROM dbo.NewDataGiniU5mrChildSurv r LEFT JOIN DimCountry c
+				ON r.geo = c.[Country Code]
+				,#INDICATORS i
+				WHERE c.[Country Code] IS NOT NULL
+				AND c.[Type] = 'country'
+				AND I.IndicatorCode = 'childSurv'
+			)fd
+			LEFT JOIN (
+				SELECT ID, SubGroup
+				FROM DimSubGroup
+				WHERE  DataSourceID = @dataSourceID
+			) s
+			ON fd.SubGroup = s.SubGroup
+			LEFT JOIN (
+				SELECT ID, age
+				FROM DimAge
+				WHERE  DataSourceID = @dataSourceID
+			) a
+			ON fd.Age = a.age
+			LEFT JOIN (
+				SELECT ID,gender
+				FROM DimGender
+				WHERE  DataSourceID = @dataSourceID
+			) g
+			ON fd.Gender = g.gender
 
 END
 

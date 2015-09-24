@@ -1,7 +1,4 @@
-USE [GapMinder]
-GO
 
-/****** Object:  StoredProcedure [dbo].[GeoEntitiesQuery]    Script Date: 7/7/2015 4:48:21 AM ******/
 DROP PROCEDURE [dbo].[GeoEntitiesQuery]
 GO
 
@@ -72,17 +69,15 @@ begin
 		end
 		else
 		begin
-			if((select count(*) from #wherecat)>0)
+			if((select count(*) from #wherecat)>0 AND (SELECT top 1 name FROM #wherecat)!='')
 			begin
 			
 				;with cte (id, cat, rnk)as
 				(
 					select cast(id as nvarchar(255)) id 
 					,cast(cat as nvarchar(255))cat 
-					,geo.rnk rnk
-					from (select *,case when cat ='planet' then 1 
-						when cat = 'region' then 2
-						when cat = 'country' then 3 end rnk from DimGeo) geo 
+					,geo.lev rnk
+					from DimGeo geo 
 					inner join #wheregeo wg on geo.id = wg.name
 
 					union all
@@ -90,10 +85,9 @@ begin
 					select g.id
 					,g.cat
 					,c.rnk+1
-					from (select *,case when cat ='planet' then 1 
-						when cat = 'region' then 2
-						when cat = 'country' then 3 end rnk from DimGeo) g 
+					from DimGeo g 
 					inner join cte c on g.region = c.id
+					where g.lev = c.rnk+1
 				)
 				select c.id into #wheregeotemp from cte c inner join #wherecat wc on c.cat = wc.name
 
