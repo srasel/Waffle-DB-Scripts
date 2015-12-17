@@ -41,6 +41,9 @@ BEGIN
 		CREATE TABLE #FROM (tab VARCHAR(100))
 		CREATE TABLE #VERSION (ver VARCHAR(100))
 		CREATE TABLE #time (period INT)
+
+		DECLARE @interpolateFlag BIT = 0
+
 		/*
 			history of data level available for each source
 		*/
@@ -55,6 +58,16 @@ BEGIN
 			INSERT INTO #SELECT
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
 			FROM @XmlStr.nodes('//root//query//SELECT') x(col)
+			
+			IF(
+				(SELECT COUNT(*) FROM #SELECT WHERE name='interpolateflag') > 0
+			)
+			BEGIN
+				SELECT @interpolateFlag = 1
+			END
+
+			DELETE FROM #SELECT
+			WHERE name = 'interpolateflag'
 
 			/*
 				transform reporting column to actual db column i.e. 
@@ -180,7 +193,7 @@ BEGIN
 			BEGIN
 				TRUNCATE TABLE #wheregender
 				DECLARE @gen VARCHAR(10) = 'N/A'
-				IF(@dataSourceID = 12)
+				IF(@dataSourceID = 12 OR @dataSourceID = 16)
 				BEGIN
 					SET @gen = 'both'
 				END
@@ -203,10 +216,10 @@ BEGIN
 			BEGIN
 				TRUNCATE TABLE #wheresubgroup
 				DECLARE @grp VARCHAR(10) = 'N/A'
-				--IF(@dataSourceID = 12)
-				--BEGIN
-				--	SET @gen = 'both'
-				--END
+				IF(@dataSourceID = 16)
+				BEGIN
+					SET @grp = 'estimates'
+				END
 				INSERT INTO #wheresubgroup (id,grp)
 				SELECT id,SubGroup FROM DimSubGroup WHERE SubGroup = @grp AND DataSourceID = @dataSourceID
 			END
@@ -489,7 +502,7 @@ BEGIN
 				DECLARE @measureWeightedByPop NVARCHAR(MAX)
 				DECLARE @measureNormal NVARCHAR(MAX)
 				DECLARE @measureFinal NVARCHAR(MAX)
-
+				
 				SELECT @measureWeighted =  stuff(
 					(
 						SELECT ',(ISNULL(['+ I.name + '],0) * ISNULL([pop],0)) [' + I.name + ']'  
@@ -531,16 +544,21 @@ BEGIN
 						SELECT ',['+ I.name + ']'  
 						FROM #whereind I
 						LEFT JOIN (SELECT Indicator FROM UtilityIndicatorCalculation 
-									WHERE CalType = 'weighted') W
+									WHERE CalType = 'weighted'
+									) W
 						ON I.name = W.Indicator
 						WHERE W.Indicator IS NULL
 						FOR XML PATH('')
 					)
 				,1,1,'')
 
+				SELECT @measureNormal = ISNULL(@measureNormal,'pop')
+
+				--select @measureFinal, @measureNormal, @measureWeighted,@measureWeightedByPop
+
 				SET @dyn_sql = N'
-					SELECT [DataSourceID], [Country Code], [Period], [SubGroup]
-						,[Age], [Gender],[pop],' + @measureFinal + '
+					SELECT [VersionID], [DataSourceID], [Country Code], [Period], [SubGroup]
+						,[Age], [Gender],' + @measureFinal + ',' + @measureNormal + ' 
 					INTO [FactFinal' + @newId + ']
 					FROM (
 						SELECT f.VersionID, f.[DataSourceID], f.[Country Code], f.[Period], f.[SubGroup]
@@ -571,7 +589,7 @@ BEGIN
 			--END
 
 			SET @dyn_sql = N'
-					SELECT ' + @colInQuerySelection + ', ' + @indColInSelectPivoted + '
+					SELECT ' + @colInQuerySelection + ', ' + @indColInSelectPivoted + '  
 					INTO [SumTable' + @newId + ']
 					FROM (SELECT * FROM dbo.[' + @factTable + '] WHERE [DataSourceID] = ' + @dataSourceID + '   AND VersionID='+ @versionID + ') f 
 					LEFT JOIN (SELECT * FROM #geoFinal) dc
@@ -593,16 +611,11 @@ BEGIN
 					AND sg.ID IS NOT NULL
 					group by ' + @colInGroupBy + '
 				'
-			PRINT @dyn_sql
+			--PRINT @dyn_sql
 
 			---return
 			EXECUTE SP_EXECUTESQL @dyn_sql, @parmDefinition, @start = @start, @END = @END
 
-			--select @colInFinalSelect
-			--return
-
-			--exec('SELECT * FROM [SumTable' + @newId + ']')
-			
 			IF(CHARINDEX('time',@colInQuerySelection,1)>0)
 			BEGIN
 				DECLARE @cols NVARCHAR(MAX)
@@ -618,6 +631,16 @@ BEGIN
 				ON C.COLUMN_NAME = I.name
 				WHERE C.TABLE_NAME = 'SumTable' + @newId
 				AND C.COLUMN_NAME NOT in ('time')
+				AND I.name IS NULL
+				FOR XML PATH('')),1,1,'')
+
+				DECLARE @colsMInt NVARCHAR(MAX)
+				SELECT @colsMInt =  stuff((SELECT ',['+ COLUMN_NAME + ']'  
+				FROM INFORMATION_SCHEMA.COLUMNS C 
+					LEFT JOIN #whereind I
+				ON C.COLUMN_NAME = I.name
+				WHERE C.TABLE_NAME = 'SumTable' + @newId
+				AND C.COLUMN_NAME NOT in ('time','isinterpolated')
 				AND I.name IS NULL
 				FOR XML PATH('')),1,1,'')
 
@@ -638,26 +661,26 @@ BEGIN
 
 				SET @dyn_sql = N'
 					INSERT INTO [SumTable' + @newId + ']
-					(' + @colsM + ',time,' + @colsI +' )
-					SELECT ' + @colsM + ',period time, ' + @colsINULL + ' 
+					(' + @colsMInt + ',time,' + @colsI +' )
+					SELECT ' + @colsMInt + ',period time, ' + @colsINULL + ' 
 					FROM [SumTable' + @newId + '], #time
-					group by ' + @colsM + ', period
+					group by ' + @colsMInt + ', period
 				'
 				EXECUTE SP_EXECUTESQL @dyn_sql
-
+				
 				IF OBJECT_ID('WithAllData', 'U') IS NOT NULL
 					DROP TABLE dbo.WithAllData 
 
 				SET @dyn_sql = N'
-					SELECT ' + @colsM + ',time, ' + @colsISUM + ' 
+					SELECT ' + @colsMInt + ',time, ' + @colsISUM + ' 
 					INTO [WithAllData' + @newId + '] 
 					FROM [SumTable' + @newId + '] 
-					group by ' + @colsM + ', time
+					group by ' + @colsMInt + ', time
 				'
 				--PRINT @DYN_SQL
 				EXECUTE SP_EXECUTESQL @dyn_sql
 				--SELECT * FROM WithAllData
-				--exec('SELECT * FROM [WithAllData' + @newId + ']')
+				--exec('SELECT * FROM [SumTable' + @newId + ']')
 				
 				DECLARE @countC NVARCHAR(MAX)
 				SELECT @countC =  stuff((
@@ -676,6 +699,13 @@ BEGIN
 				SELECT ',(ROW_NUMBER() OVER (PARTITION BY ' + @colsM +',['+ I.name +'C] ORDER BY [time]) - 1)['+ I.name +'M]'  
 				FROM #whereind I
 				FOR XML PATH('')),1,1,'')
+
+				DECLARE @MInterPolate NVARCHAR(MAX)
+				SELECT @MInterPolate =  stuff((
+				SELECT ',case when ['+ I.name +'M] = 0 then 0 else 1 end ['+I.name + '_interpolateflag]'  
+				FROM #whereind I
+				FOR XML PATH('')),1,1,'')
+
 
 				DECLARE @N NVARCHAR(MAX)
 				SELECT @N =  stuff((
@@ -696,8 +726,8 @@ BEGIN
 				FOR XML PATH('')),1,1,'')
 			
 				SET @dyn_sql = N'
-					SELECT ' + @colsM + ',[time]
-					,' + @val + '
+					SELECT ' + @colsMInt + ',[time]
+					,' + @val + '' + CASE WHEN @interpolateFlag = 1 THEN ',' + @MInterPolate ELSE '' END + ' 
 					FROM
 					(
 						SELECT ' + @colsM + ',' + @colsI + ',[time], ' + @S + '
@@ -712,7 +742,7 @@ BEGIN
 						) a
 					) a
 				'
-				--print @dyn_sql
+				print @dyn_sql
 				EXECUTE SP_EXECUTESQL @dyn_sql
 
 			END
@@ -768,5 +798,33 @@ END
 
 
 GO
+
+
+execute StatsQuery
+'
+<root>
+  <query>
+    <SELECT>geo</SELECT>
+    <SELECT>geo.name</SELECT>
+	<SELECT>time</SELECT>
+	<SELECT>lex</SELECT>
+	<SELECT>pop</SELECT>
+	<SELECT>interpolateflag</SELECT>
+	<WHERE>
+      <geo>*</geo>
+      <geo.cat>region</geo.cat>
+      <time>2000-2018</time>
+      <quantity />
+      <age />
+      <gender />
+      <group />
+    </WHERE>
+    <FROM>spreedsheet</FROM>
+    <VERSION />
+  </query>
+  <lang>en</lang>
+</root>
+'
+
 
 

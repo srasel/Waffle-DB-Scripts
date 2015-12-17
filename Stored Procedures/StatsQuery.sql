@@ -41,6 +41,8 @@ BEGIN
 		CREATE TABLE #FROM (tab VARCHAR(100))
 		CREATE TABLE #VERSION (ver VARCHAR(100))
 		CREATE TABLE #time (period INT)
+
+		DECLARE @interpolateFlag BIT = 0
 		
 		SET @XmlStr = @XML
 		SET @newId = NEWID()
@@ -56,6 +58,16 @@ BEGIN
 			INSERT INTO #SELECT
 			SELECT x.col.value('.', 'VARCHAR(100)') AS [text()]
 			FROM @XmlStr.nodes('//root//query//SELECT') x(col)
+
+			IF(
+				(SELECT COUNT(*) FROM #SELECT WHERE name='interpolateflag') > 0
+			)
+			BEGIN
+				SELECT @interpolateFlag = 1
+			END
+
+			DELETE FROM #SELECT
+			WHERE name = 'interpolateflag'
 
 			/*
 				transform reporting column to actual db column i.e. 
